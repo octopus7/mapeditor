@@ -12,6 +12,7 @@ import {
   getNeighborMask,
   getTransitionLayers,
   getWaterBankMask,
+  getWaterBankCornerMask,
   getWaterDepths,
   normalizeBlobMask,
 } from "../src/autotile";
@@ -123,6 +124,22 @@ describe("autotile calculations", () => {
     ]);
   });
 
+  it("adds a diagonal corner correction when both touching edges continue", () => {
+    const map = createMap([
+      ["stone", "stone", "grass"],
+      ["stone", "grass", "grass"],
+      ["grass", "grass", "grass"],
+    ]);
+
+    expect(getTransitionCorrections(map, 1, 1)).toContainEqual({
+      ground: "grass",
+      targetColumn: 0,
+      targetRow: 0,
+      mask: NEIGHBOR_MASK.SE,
+      priority: GROUND_PRIORITY.stone,
+    });
+  });
+
   it("keeps water out of ground overlays so land keeps its own ground", () => {
     const map = createMap([
       ["dirt", "water", "dirt"],
@@ -181,6 +198,16 @@ describe("autotile calculations", () => {
     ]);
 
     expect(getWaterBankMask(map, 1, 1)).toBe(0);
+  });
+
+  it("returns a water corner when the two touching water edges continue", () => {
+    const map = createMap([
+      ["grass", "water", "water"],
+      ["grass", "grass", "water"],
+      ["grass", "grass", "grass"],
+    ]);
+
+    expect(getWaterBankCornerMask(map, 1, 1)).toBe(NEIGHBOR_MASK.NE);
   });
 
   it("classifies bridge connections as horizontal, vertical, corners, and full", () => {

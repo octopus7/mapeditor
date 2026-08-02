@@ -4,7 +4,7 @@ export const GRID_ROWS = 18;
 export const groundTypes = ["grass", "dirt", "stone", "water"] as const;
 export type GroundType = (typeof groundTypes)[number];
 
-export const tileElevations = [0, 1] as const;
+export const tileElevations = [0, 1, 2] as const;
 export type TileElevation = (typeof tileElevations)[number];
 
 export const propTypes = [

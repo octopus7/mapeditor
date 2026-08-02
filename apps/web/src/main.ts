@@ -11,6 +11,7 @@ import {
   getBridgeTextureRotation,
   getPropNeighborMask,
   getTransitionCorrections,
+  getWaterBankCornerMask,
   getWaterBankMask,
   getWaterDepths,
   NEIGHBOR_MASK,
@@ -25,6 +26,7 @@ import { getResizeOffsets, MAX_MAP_SIZE, MIN_MAP_SIZE, MapStorageClient, resizeM
 import { formatDeploymentTime, parseDeploymentMetadata } from "./deployment-meta";
 
 const CELL_SIZE = 36;
+const MAX_BRUSH_SIZE = 10;
 const DEFAULT_IMAGE_ROTATION = 0;
 const DEFAULT_IMAGE_SCALE = 2;
 const STORAGE_KEY = "mapeditor-draft-v1";
@@ -106,6 +108,13 @@ type MovingImage = {
 
 let map = restoreDraft() ?? createInitialMap();
 let waterDepths: number[] = [];
+type BrushMode = "brush" | "shape";
+type BrushShape = "square" | "circle" | "rectangle" | "ellipse";
+type ShapeDrag = { start: CellPosition; current: CellPosition | null; erase: boolean };
+let brushSize = 1;
+let brushMode: BrushMode = "brush";
+let brushShape: BrushShape = "square";
+let shapeDrag: ShapeDrag | null = null;
 let savedMapId: string | null = null;
 let selectedLayer: Layer = "ground";
 let selectedGroundEditTab: GroundEditTab = "terrain";
@@ -221,7 +230,7 @@ document.querySelector<HTMLDivElement>("#app")!.innerHTML = `
           </div>
           </section>
           <section class="hidden" id="elevation-palette">
-            <div class="section-label"><span>TILE HEIGHT</span><span>1 TILE</span></div>
+            <div class="section-label"><span>TILE HEIGHT</span><span>3 LEVELS</span></div>
             <div class="tile-elevation-list" role="radiogroup" aria-label="타일 높이">
               <button class="tile-elevation-option" type="button" data-tile-elevation="0" role="radio" aria-checked="false">
                 <span class="tile-elevation-icon base" aria-hidden="true"></span>
@@ -231,8 +240,32 @@ document.querySelector<HTMLDivElement>("#app")!.innerHTML = `
                 <span class="tile-elevation-icon raised" aria-hidden="true"></span>
                 <span><strong>1층 올리기</strong><small>타일 한 칸 높이 올리기</small></span>
               </button>
+              <button class="tile-elevation-option" type="button" data-tile-elevation="2" role="radio" aria-checked="false">
+                <span class="tile-elevation-icon raised two" aria-hidden="true"></span>
+                <span><strong>2층 올리기</strong><small>타일 두 칸 높이 올리기</small></span>
+              </button>
             </div>
-            <p class="tile-elevation-hint">물 타일은 올릴 수 없습니다. 비물 타일을 드래그해 높이를 칠하세요.</p>
+            <p class="tile-elevation-hint">물 타일은 올릴 수 없습니다. 높이를 선택해 타일을 칠하세요.</p>
+          </section>
+          <section class="brush-size-control" aria-label="Brush size">
+            <div class="section-label"><span>BRUSH SIZE</span><output id="brush-size-output">1 × 1</output></div>
+            <div class="brush-size-row">
+              <input id="brush-size-range" class="transform-range" type="range" min="1" max="10" step="1" value="1" aria-label="Brush size from 1 to 10 cells" />
+              <input id="brush-size-number" class="brush-size-number" type="number" min="1" max="10" step="1" value="1" aria-label="Brush size" />
+            </div>
+            <div class="brush-tool-list" role="group" aria-label="Tile tool mode">
+              <button class="brush-tool active" type="button" data-brush-mode="brush" aria-pressed="true">Brush</button>
+              <button class="brush-tool" type="button" data-brush-mode="shape" aria-pressed="false">Shape fill</button>
+            </div>
+            <div class="brush-shape-list" id="brush-shapes" role="group" aria-label="Brush shape">
+              <button class="brush-shape active" type="button" data-brush-shape="square" aria-pressed="true">Square</button>
+              <button class="brush-shape" type="button" data-brush-shape="circle" aria-pressed="false">Circle</button>
+            </div>
+            <div class="brush-shape-list hidden" id="fill-shapes" role="group" aria-label="Fill shape">
+              <button class="brush-shape active" type="button" data-brush-shape="rectangle" aria-pressed="true">Rectangle</button>
+              <button class="brush-shape" type="button" data-brush-shape="ellipse" aria-pressed="false">Ellipse</button>
+            </div>
+            <p class="brush-size-hint" id="brush-size-hint">Paint a square area from 1 × 1 up to 10 × 10 cells.</p>
           </section>
         </section>
         <section class="palette-section hidden" id="prop-palette">
@@ -512,17 +545,39 @@ function escapeHtml(value: string): string {
   const characters: Record<string, string> = { "&": "&amp;", "<": "&lt;", ">": "&gt;", "'": "&#039;", '"': "&quot;" };
   return value.replace(/[&<>'"]/g, (character) => characters[character]);
 }
+const GROUND_NOISE_PATTERN_SIZE = 32;
+const GROUND_NOISE_PATTERN_SEED = 0x6d617065;
+function createGroundNoisePattern(): Int8Array {
+  const pattern = new Int8Array(GROUND_NOISE_PATTERN_SIZE * GROUND_NOISE_PATTERN_SIZE);
+  let state = GROUND_NOISE_PATTERN_SEED;
+  for (let index = 0; index < pattern.length; index += 1) {
+    state ^= state << 13;
+    state ^= state >>> 17;
+    state ^= state << 5;
+    state >>>= 0;
+    pattern[index] = (state % 11) - 5;
+  }
+  return pattern;
+}
+const GROUND_NOISE_PATTERN = createGroundNoisePattern();
 function colorNoise(column: number, row: number): number {
-  return ((column * 31 + row * 17 + 26) % 11) - 5;
+  const patternColumn = ((column % GROUND_NOISE_PATTERN_SIZE) + GROUND_NOISE_PATTERN_SIZE) % GROUND_NOISE_PATTERN_SIZE;
+  const patternRow = ((row % GROUND_NOISE_PATTERN_SIZE) + GROUND_NOISE_PATTERN_SIZE) % GROUND_NOISE_PATTERN_SIZE;
+  return GROUND_NOISE_PATTERN[patternRow * GROUND_NOISE_PATTERN_SIZE + patternColumn];
 }
 const groundPalettes: Record<GroundType, [number, number, number]> = {
   grass: [104, 151, 85], dirt: [162, 126, 79], stone: [127, 132, 121], water: [58, 137, 153],
 };
+function mixGroundColor(palette: [number, number, number], noise: number): [number, number, number] {
+  const amount = Math.min(Math.abs(noise), 5) / 5 * .045;
+  const target = noise >= 0 ? 255 : 0;
+  return palette.map((channel) => Math.round(channel * (1 - amount) + target * amount)) as [number, number, number];
+}
 function drawGroundTexture(column: number, row: number, ground: GroundType): void {
   const x = column * CELL_SIZE;
   const y = row * CELL_SIZE;
   const noise = colorNoise(column, row);
-  let [r, g, b] = groundPalettes[ground];
+  let [r, g, b] = mixGroundColor(groundPalettes[ground], noise);
   if (ground === "water") {
     const depth = Math.min(Math.max(waterDepths[cellIndex(map, column, row)] ?? 0, 0), 8);
     const depthRatio = depth / 8;
@@ -568,13 +623,9 @@ function drawWaterBankFace(column: number, row: number, ground: GroundType, dire
         : "E";
   const x = targetColumn * CELL_SIZE;
   const y = targetRow * CELL_SIZE;
-  // Keep the correction on the adjacent water tile. The 6 o'clock side gets
-  // the strongest drop, the 12 o'clock side keeps only a thin ridge.
-  const thickness = targetDirection === "S"
-    ? CELL_SIZE * .40
-    : targetDirection === "N"
-      ? CELL_SIZE * .13
-      : CELL_SIZE * .07;
+  // Keep the correction on the adjacent water tile. From the land tile,
+  // 6 o'clock gets the deepest drop while 12 o'clock matches the side width.
+  const thickness = direction === "S" ? CELL_SIZE * .40 : CELL_SIZE * .07;
   const [r, g, b] = waterBankPalettes[ground];
   const soil = `rgb(${r}, ${g}, ${b})`;
   const dark = `rgb(${Math.round(r * .58)}, ${Math.round(g * .58)}, ${Math.round(b * .58)})`;
@@ -627,47 +678,136 @@ function drawWaterBank(column: number, row: number, ground: GroundType, mask: nu
     if (mask & bit) drawWaterBankFace(column, row, ground, direction);
   }
 }
+type WaterBankCornerDirection = "NE" | "SE" | "SW" | "NW";
+function drawWaterBankCornerFace(column: number, row: number, ground: GroundType, direction: WaterBankCornerDirection): void {
+  const targetColumn = direction === "NE" || direction === "SE" ? column + 1 : column - 1;
+  const targetRow = direction === "NE" || direction === "NW" ? row - 1 : row + 1;
+  if (targetColumn < 0 || targetColumn >= map.columns || targetRow < 0 || targetRow >= map.rows) return;
+  const targetCorner: WaterBankCornerDirection = direction === "NE"
+    ? "SW"
+    : direction === "SE"
+      ? "NW"
+      : direction === "SW"
+        ? "NE"
+        : "SE";
+  const x = targetColumn * CELL_SIZE;
+  const y = targetRow * CELL_SIZE;
+  const edge = CELL_SIZE * .25;
+  const [r, g, b] = waterBankPalettes[ground];
+  const soil = `rgb(${r}, ${g}, ${b})`;
+  const dark = `rgb(${Math.round(r * .58)}, ${Math.round(g * .58)}, ${Math.round(b * .58)})`;
+  context.save();
+  context.globalAlpha = .92;
+  context.fillStyle = soil;
+  context.strokeStyle = dark;
+  context.lineWidth = 1;
+  context.beginPath();
+  if (targetCorner === "NE") {
+    context.moveTo(x + CELL_SIZE, y); context.lineTo(x + CELL_SIZE, y + edge); context.lineTo(x + CELL_SIZE - edge, y); context.closePath();
+  } else if (targetCorner === "SE") {
+    context.moveTo(x + CELL_SIZE, y + CELL_SIZE); context.lineTo(x + CELL_SIZE - edge, y + CELL_SIZE); context.lineTo(x + CELL_SIZE, y + CELL_SIZE - edge); context.closePath();
+  } else if (targetCorner === "SW") {
+    context.moveTo(x, y + CELL_SIZE); context.lineTo(x, y + CELL_SIZE - edge); context.lineTo(x + edge, y + CELL_SIZE); context.closePath();
+  } else {
+    context.moveTo(x, y); context.lineTo(x + edge, y); context.lineTo(x, y + edge); context.closePath();
+  }
+  context.fill();
+  context.stroke();
+  context.restore();
+}
+function drawWaterBankCorners(column: number, row: number, ground: GroundType, mask: number): void {
+  const corners: Array<[number, WaterBankCornerDirection]> = [
+    [NEIGHBOR_MASK.NE, "NE"], [NEIGHBOR_MASK.SE, "SE"], [NEIGHBOR_MASK.SW, "SW"], [NEIGHBOR_MASK.NW, "NW"],
+  ];
+  for (const [bit, direction] of corners) if (mask & bit) drawWaterBankCornerFace(column, row, ground, direction);
+}
 const raisedTileSidePalettes: Record<GroundType, [number, number, number]> = {
   grass: [74, 50, 30], dirt: [91, 58, 34], stone: [73, 74, 66], water: [35, 84, 91],
 };
-const RAISED_FACE_DEPTH = CELL_SIZE * .34;
-function drawRaisedTileFace(column: number, row: number, ground: GroundType, direction: "E" | "S"): void {
+const RAISED_SIDE_DEPTH = CELL_SIZE / 3;
+function drawRaisedTileFace(column: number, row: number, ground: GroundType, elevation: TileElevation, direction: "E" | "S" | "W"): void {
   const x = column * CELL_SIZE;
   const y = row * CELL_SIZE;
   const [r, g, b] = raisedTileSidePalettes[ground];
+  const faceDepth = direction === "S" ? CELL_SIZE * elevation : RAISED_SIDE_DEPTH;
   const shadow = `rgb(${Math.round(r * .72)}, ${Math.round(g * .72)}, ${Math.round(b * .72)})`;
+  const mid = `rgb(${Math.round(r * .58)}, ${Math.round(g * .58)}, ${Math.round(b * .58)})`;
   const dark = `rgb(${Math.round(r * .46)}, ${Math.round(g * .46)}, ${Math.round(b * .46)})`;
+  const highlight = `rgb(${Math.min(255, Math.round(r * 1.18))}, ${Math.min(255, Math.round(g * 1.18))}, ${Math.min(255, Math.round(b * 1.18))})`;
+  const faceX = direction === "W" ? x - faceDepth : direction === "E" ? x + CELL_SIZE : x;
+  const faceY = direction === "S" ? y + CELL_SIZE : y;
   const gradient = direction === "S"
-    ? context.createLinearGradient(0, y + CELL_SIZE, 0, y + CELL_SIZE + RAISED_FACE_DEPTH)
-    : context.createLinearGradient(x + CELL_SIZE, 0, x + CELL_SIZE + RAISED_FACE_DEPTH, 0);
+    ? context.createLinearGradient(0, faceY, 0, faceY + faceDepth)
+    : context.createLinearGradient(faceX, 0, faceX + (direction === "W" ? faceDepth : faceDepth), 0);
   gradient.addColorStop(0, shadow);
+  gradient.addColorStop(.35, mid);
   gradient.addColorStop(.72, shadow);
   gradient.addColorStop(1, dark);
   context.save();
   context.fillStyle = gradient;
-  if (direction === "S") context.fillRect(x, y + CELL_SIZE, CELL_SIZE, RAISED_FACE_DEPTH);
-  else context.fillRect(x + CELL_SIZE, y, RAISED_FACE_DEPTH, CELL_SIZE);
-  context.globalAlpha = .52;
+  context.fillRect(faceX, faceY, direction === "S" ? CELL_SIZE : faceDepth, direction === "S" ? faceDepth : CELL_SIZE);
+  context.globalAlpha = .58;
   context.strokeStyle = dark;
   context.lineWidth = 1;
-  context.beginPath();
   if (direction === "S") {
-    context.moveTo(x, y + CELL_SIZE + RAISED_FACE_DEPTH); context.lineTo(x + CELL_SIZE, y + CELL_SIZE + RAISED_FACE_DEPTH);
+    context.beginPath();
+    context.moveTo(x, faceY + faceDepth - 1); context.lineTo(x + CELL_SIZE, faceY + faceDepth - 1);
+    context.stroke();
+    context.strokeStyle = highlight;
+    context.globalAlpha = .35;
+    context.beginPath();
+    context.moveTo(x, faceY + 1); context.lineTo(x + CELL_SIZE, faceY + 1);
+    context.stroke();
+    context.strokeStyle = dark;
+    context.globalAlpha = .44;
+    for (let band = 1; band <= 3; band += 1) {
+      const lineY = faceY + (faceDepth * band) / 4;
+      const wobble = colorNoise(column + band, row - band) * .35;
+      context.beginPath();
+      context.moveTo(x, lineY + wobble);
+      context.quadraticCurveTo(x + CELL_SIZE * .28, lineY - 2 + wobble, x + CELL_SIZE * .52, lineY + 1 - wobble);
+      context.quadraticCurveTo(x + CELL_SIZE * .78, lineY + 3 + wobble, x + CELL_SIZE, lineY - 1 + wobble);
+      context.stroke();
+    }
+    context.globalAlpha = .22;
+    for (let patch = 0; patch < 5; patch += 1) {
+      const patchX = x + 4 + ((column * 11 + row * 7 + patch * 17) % Math.max(8, CELL_SIZE - 12));
+      const patchY = faceY + 8 + ((row * 13 + column * 5 + patch * 11) % Math.max(8, faceDepth - 14));
+      const patchWidth = 5 + ((patch * 3 + column + row) % 7);
+      context.fillStyle = patch % 2 === 0 ? dark : highlight;
+      context.beginPath();
+      context.moveTo(patchX, patchY + 2);
+      context.lineTo(patchX + patchWidth * .42, patchY);
+      context.lineTo(patchX + patchWidth, patchY + 3);
+      context.lineTo(patchX + patchWidth * .62, patchY + 6);
+      context.closePath();
+      context.fill();
+    }
+  } else if (direction === "E") {
+    context.beginPath();
+    context.moveTo(faceX + faceDepth - 1, y); context.lineTo(faceX + faceDepth - 1, y + CELL_SIZE);
+    context.stroke();
   } else {
-    context.moveTo(x + CELL_SIZE + RAISED_FACE_DEPTH, y); context.lineTo(x + CELL_SIZE + RAISED_FACE_DEPTH, y + CELL_SIZE);
+    context.beginPath();
+    context.moveTo(faceX + 1, y); context.lineTo(faceX + 1, y + CELL_SIZE);
+    context.stroke();
   }
-  context.stroke();
   context.restore();
 }
 function drawRaisedTile(column: number, row: number): void {
   const current = map.cells[cellIndex(map, column, row)];
-  if (current.elevation !== 1 || current.ground === "water") return;
+  if (current.elevation === 0 || current.ground === "water") return;
   const south = row + 1 < map.rows ? map.cells[cellIndex(map, column, row + 1)] : null;
   const east = column + 1 < map.columns ? map.cells[cellIndex(map, column + 1, row)] : null;
-  if (!south || south.elevation < current.elevation) drawRaisedTileFace(column, row, current.ground, "S");
-  if (!east || east.elevation < current.elevation) drawRaisedTileFace(column, row, current.ground, "E");
+  const west = column > 0 ? map.cells[cellIndex(map, column - 1, row)] : null;
+  if (!south || south.elevation < current.elevation) {
+    const exposedHeight = current.elevation - (south?.elevation ?? 0);
+    drawRaisedTileFace(column, row, current.ground, exposedHeight as TileElevation, "S");
+  }
+  if (!east || east.elevation < current.elevation) drawRaisedTileFace(column, row, current.ground, current.elevation, "E");
+  if (!west || west.elevation < current.elevation) drawRaisedTileFace(column, row, current.ground, current.elevation, "W");
 }
-function createTransitionPath(column: number, row: number, mask: number): Path2D {
+function createTransitionCorrectionPath(column: number, row: number, mask: number): Path2D {
   const x = column * CELL_SIZE;
   const y = row * CELL_SIZE;
   const edge = CELL_SIZE * .25;
@@ -676,11 +816,18 @@ function createTransitionPath(column: number, row: number, mask: number): Path2D
   if (mask & NEIGHBOR_MASK.E) path.rect(x + CELL_SIZE - edge, y, edge, CELL_SIZE);
   if (mask & NEIGHBOR_MASK.S) path.rect(x, y + CELL_SIZE - edge, CELL_SIZE, edge);
   if (mask & NEIGHBOR_MASK.W) path.rect(x, y, edge, CELL_SIZE);
-  const cornerRadius = edge * .9;
-  if (mask & NEIGHBOR_MASK.NE) path.arc(x + CELL_SIZE - edge / 2, y + edge / 2, cornerRadius, 0, Math.PI * 2);
-  if (mask & NEIGHBOR_MASK.SE) path.arc(x + CELL_SIZE - edge / 2, y + CELL_SIZE - edge / 2, cornerRadius, 0, Math.PI * 2);
-  if (mask & NEIGHBOR_MASK.SW) path.arc(x + edge / 2, y + CELL_SIZE - edge / 2, cornerRadius, 0, Math.PI * 2);
-  if (mask & NEIGHBOR_MASK.NW) path.arc(x + edge / 2, y + edge / 2, cornerRadius, 0, Math.PI * 2);
+  if (mask & NEIGHBOR_MASK.NE) {
+    path.moveTo(x + CELL_SIZE, y); path.lineTo(x + CELL_SIZE, y + edge); path.lineTo(x + CELL_SIZE - edge, y); path.closePath();
+  }
+  if (mask & NEIGHBOR_MASK.SE) {
+    path.moveTo(x + CELL_SIZE, y + CELL_SIZE); path.lineTo(x + CELL_SIZE - edge, y + CELL_SIZE); path.lineTo(x + CELL_SIZE, y + CELL_SIZE - edge); path.closePath();
+  }
+  if (mask & NEIGHBOR_MASK.SW) {
+    path.moveTo(x, y + CELL_SIZE); path.lineTo(x, y + CELL_SIZE - edge); path.lineTo(x + edge, y + CELL_SIZE); path.closePath();
+  }
+  if (mask & NEIGHBOR_MASK.NW) {
+    path.moveTo(x, y); path.lineTo(x + edge, y); path.lineTo(x, y + edge); path.closePath();
+  }
   return path;
 }
 function drawGround(column: number, row: number, ground: GroundType): void {
@@ -688,7 +835,7 @@ function drawGround(column: number, row: number, ground: GroundType): void {
 }
 function drawGroundCorrection(ground: GroundType, targetColumn: number, targetRow: number, mask: number): void {
   context.save();
-  context.clip(createTransitionPath(targetColumn, targetRow, mask));
+  context.clip(createTransitionCorrectionPath(targetColumn, targetRow, mask));
   drawGroundTexture(targetColumn, targetRow, ground);
   context.restore();
 }
@@ -700,6 +847,8 @@ function drawGroundCorrections(): void {
     const ground = map.cells[cellIndex(map, column, row)].ground;
     const waterBankMask = getWaterBankMask(map, column, row);
     if (waterBankMask) drawWaterBank(column, row, ground, waterBankMask);
+    const waterBankCornerMask = getWaterBankCornerMask(map, column, row);
+    if (waterBankCornerMask) drawWaterBankCorners(column, row, ground, waterBankCornerMask);
   }
 }
 function drawElevationHighlights(): void {
@@ -709,9 +858,24 @@ function drawElevationHighlights(): void {
   context.strokeStyle = "rgba(255, 184, 35, .98)";
   context.lineWidth = 2;
   for (let row = 0; row < map.rows; row += 1) for (let column = 0; column < map.columns; column += 1) {
-    if (map.cells[cellIndex(map, column, row)].elevation !== 1) continue;
+    if (map.cells[cellIndex(map, column, row)].elevation === 0) continue;
     const x = column * CELL_SIZE;
     const y = row * CELL_SIZE;
+    context.fillRect(x, y, CELL_SIZE, CELL_SIZE);
+    context.strokeRect(x + 1, y + 1, CELL_SIZE - 2, CELL_SIZE - 2);
+  }
+  context.restore();
+}
+function drawShapePreview(): void {
+  if (selectedLayer !== "ground" || brushMode !== "shape" || !shapeDrag?.current) return;
+  const cells = getShapeCells(shapeDrag.start, shapeDrag.current, brushShape as "rectangle" | "ellipse");
+  context.save();
+  context.fillStyle = shapeDrag.erase ? "rgba(166, 81, 58, .22)" : "rgba(49, 90, 61, .23)";
+  context.strokeStyle = shapeDrag.erase ? "rgba(166, 81, 58, .66)" : "rgba(49, 90, 61, .7)";
+  context.lineWidth = 1.5;
+  for (const cell of cells) {
+    const x = cell.column * CELL_SIZE;
+    const y = cell.row * CELL_SIZE;
     context.fillRect(x, y, CELL_SIZE, CELL_SIZE);
     context.strokeRect(x + 1, y + 1, CELL_SIZE - 2, CELL_SIZE - 2);
   }
@@ -924,6 +1088,7 @@ function render(): void {
     drawRaisedTile(column, row);
   }
   drawElevationHighlights();
+  drawShapePreview();
   for (let row = 0; row < map.rows; row += 1) for (let column = 0; column < map.columns; column += 1) {
     const prop = map.cells[cellIndex(map, column, row)].prop;
     if (!prop) continue;
@@ -1130,6 +1295,103 @@ function getCell(event: PointerEvent): CellPosition | null {
   const row = Math.floor((event.clientY - rect.top) / scaleY / CELL_SIZE);
   return column >= 0 && row >= 0 && column < map.columns && row < map.rows ? { column, row } : null;
 }
+function setBrushSize(value: number): void {
+  const next = Number.isFinite(value) ? Math.max(1, Math.min(MAX_BRUSH_SIZE, Math.round(value))) : brushSize;
+  brushSize = next;
+  const range = document.querySelector<HTMLInputElement>("#brush-size-range");
+  const number = document.querySelector<HTMLInputElement>("#brush-size-number");
+  const output = document.querySelector<HTMLOutputElement>("#brush-size-output");
+  if (range) range.value = String(next);
+  if (number) number.value = String(next);
+  if (output) output.value = `${next} × ${next}`;
+}
+function updateBrushShapeButtons(): void {
+  document.querySelectorAll<HTMLButtonElement>("[data-brush-shape]").forEach((button) => {
+    const active = button.dataset.brushShape === brushShape;
+    button.classList.toggle("active", active);
+    button.setAttribute("aria-pressed", String(active));
+  });
+}
+function setBrushMode(mode: BrushMode): void {
+  brushMode = mode;
+  if (mode === "brush" && (brushShape === "rectangle" || brushShape === "ellipse")) brushShape = "square";
+  if (mode === "shape" && (brushShape === "square" || brushShape === "circle")) brushShape = "rectangle";
+  document.querySelectorAll<HTMLButtonElement>("[data-brush-mode]").forEach((button) => {
+    const active = button.dataset.brushMode === mode;
+    button.classList.toggle("active", active);
+    button.setAttribute("aria-pressed", String(active));
+  });
+  document.querySelector("#brush-shapes")?.classList.toggle("hidden", mode !== "brush");
+  document.querySelector("#fill-shapes")?.classList.toggle("hidden", mode !== "shape");
+  const hint = document.querySelector("#brush-size-hint");
+  if (hint) hint.textContent = mode === "shape"
+    ? "Drag across the map to fill a rectangle or ellipse."
+    : "Paint a square or circle from 1 × 1 up to 10 × 10 cells.";
+  updateBrushShapeButtons();
+  shapeDrag = null;
+  render();
+}
+function setBrushShape(shape: BrushShape): void {
+  const valid = brushMode === "brush"
+    ? shape === "square" || shape === "circle"
+    : shape === "rectangle" || shape === "ellipse";
+  if (!valid) return;
+  brushShape = shape;
+  updateBrushShapeButtons();
+  render();
+}
+function getBrushCells(column: number, row: number): CellPosition[] {
+  const cells: CellPosition[] = [];
+  const startColumn = column - Math.floor(brushSize / 2);
+  const startRow = row - Math.floor(brushSize / 2);
+  const center = (brushSize - 1) / 2;
+  const radius = brushSize / 2;
+  for (let brushRow = 0; brushRow < brushSize; brushRow += 1) for (let brushColumn = 0; brushColumn < brushSize; brushColumn += 1) {
+    if (brushShape === "circle") {
+      const distanceX = brushColumn - center;
+      const distanceY = brushRow - center;
+      if (distanceX * distanceX + distanceY * distanceY > radius * radius) continue;
+    }
+    const targetColumn = startColumn + brushColumn;
+    const targetRow = startRow + brushRow;
+    if (targetColumn >= 0 && targetColumn < map.columns && targetRow >= 0 && targetRow < map.rows) {
+      cells.push({ column: targetColumn, row: targetRow });
+    }
+  }
+  return cells;
+}
+function getShapeCells(start: CellPosition, current: CellPosition, shape: "rectangle" | "ellipse"): CellPosition[] {
+  const left = Math.min(start.column, current.column);
+  const right = Math.max(start.column, current.column);
+  const top = Math.min(start.row, current.row);
+  const bottom = Math.max(start.row, current.row);
+  const width = right - left + 1;
+  const height = bottom - top + 1;
+  const centerColumn = (left + right + 1) / 2;
+  const centerRow = (top + bottom + 1) / 2;
+  const radiusColumn = width / 2;
+  const radiusRow = height / 2;
+  const cells: CellPosition[] = [];
+  for (let row = top; row <= bottom; row += 1) for (let column = left; column <= right; column += 1) {
+    if (shape === "ellipse") {
+      const distanceColumn = (column + .5 - centerColumn) / radiusColumn;
+      const distanceRow = (row + .5 - centerRow) / radiusRow;
+      if (distanceColumn * distanceColumn + distanceRow * distanceRow > 1) continue;
+    }
+    if (column >= 0 && column < map.columns && row >= 0 && row < map.rows) cells.push({ column, row });
+  }
+  return cells;
+}
+function applyGroundCells(candidate: MapDocument, cells: CellPosition[], erase: boolean): boolean {
+  let changed = false;
+  for (const target of cells) {
+    const nextChanged = selectedGroundEditTab === "elevation"
+      ? setTileElevation(candidate, target.column, target.row, erase ? 0 : selectedTileElevation)
+      : paintGround(candidate, target.column, target.row, erase ? "grass" : selectedGround);
+    changed = nextChanged || changed;
+  }
+  return changed;
+}
 function getTopImageIndex(column: number, row: number): number {
   for (let index = map.images.length - 1; index >= 0; index -= 1) {
     const image = map.images[index];
@@ -1160,11 +1422,20 @@ function paintAt(event: PointerEvent): void {
       movingProp.target = null;
       render();
     }
+    if (shapeDrag) {
+      shapeDrag.current = null;
+      render();
+    }
     return;
   }
   const { column, row } = cell;
   document.querySelector("#cursor-status")!.textContent = `열 ${column + 1} · 행 ${row + 1}`;
   if (!isDrawing) return;
+  if (selectedLayer === "ground" && brushMode === "shape" && shapeDrag) {
+    shapeDrag.current = cell;
+    render();
+    return;
+  }
   if (selectedLayer === "prop" && propMode === "move" && movingProp) {
     movingProp.target = cell;
     render();
@@ -1199,9 +1470,7 @@ function paintAt(event: PointerEvent): void {
   }
   const candidate = cloneMap(map);
   const changed = selectedLayer === "ground"
-    ? selectedGroundEditTab === "elevation"
-      ? setTileElevation(candidate, column, row, erase ? 0 : selectedTileElevation)
-      : paintGround(candidate, column, row, erase ? "grass" : selectedGround)
+    ? applyGroundCells(candidate, getBrushCells(column, row), erase)
     : placeProp(candidate, column, row, erase ? null : selectedProp);
   if (!changed) return;
   if (!strokeChanged) { history.push(cloneMap(map)); if (history.length > 60) history.shift(); future = []; }
@@ -1213,6 +1482,27 @@ function finishStroke(): void {
     isDrawing = false;
     lastPaintedCell = "";
     updateViewport();
+    return;
+  }
+  if (shapeDrag) {
+    const drag = shapeDrag;
+    shapeDrag = null;
+    if (drag.current) {
+      const candidate = cloneMap(map);
+      const changed = applyGroundCells(candidate, getShapeCells(drag.start, drag.current, brushShape as "rectangle" | "ellipse"), drag.erase);
+      if (changed) {
+        history.push(cloneMap(map));
+        if (history.length > 60) history.shift();
+        future = [];
+        strokeChanged = true;
+        map = candidate;
+      }
+    }
+    render();
+    if (strokeChanged) scheduleSave();
+    isDrawing = false;
+    strokeChanged = false;
+    lastPaintedCell = "";
     return;
   }
   if (movingProp) {
@@ -1299,33 +1589,48 @@ function openMapSaveDialog(asNew = false): void {
   setDialogMessage("#map-save-message", authSession ? "" : "DB 저장은 로그인이 필요합니다.");
   dialog.showModal();
 }
-async function saveMapToCloud(): Promise<void> {
+async function saveMapToCloud(showDialog = true): Promise<void> {
   const button = document.querySelector<HTMLButtonElement>("#confirm-map-save")!;
   if (!authSession || !mapStorageClient) {
-    setDialogMessage("#map-save-message", "DB 저장은 로그인이 필요합니다.", "error");
+    if (showDialog) setDialogMessage("#map-save-message", "DB 저장은 로그인이 필요합니다.", "error");
     return;
   }
-  const name = document.querySelector<HTMLInputElement>("#map-save-name")!.value.trim();
+  const name = showDialog
+    ? document.querySelector<HTMLInputElement>("#map-save-name")!.value.trim()
+    : map.name.trim();
   if (!name) {
-    setDialogMessage("#map-save-message", "지도 이름을 입력해 주세요.", "error");
+    if (showDialog) setDialogMessage("#map-save-message", "지도 이름을 입력해 주세요.", "error");
     return;
   }
-  button.disabled = true;
-  setDialogMessage("#map-save-message", "저장 중입니다.");
+  if (showDialog) {
+    button.disabled = true;
+    setDialogMessage("#map-save-message", "저장 중입니다.");
+  } else {
+    document.querySelector("#save-status")!.textContent = "Saving map...";
+  }
   try {
     const saved = saveAsMode || !savedMapId
       ? await mapStorageClient.saveMap(authSession.token, map, name)
       : await mapStorageClient.updateMap(authSession.token, savedMapId, map, name);
     savedMapId = saved.id;
+    saveAsMode = false;
     map.name = saved.name;
     syncName();
     scheduleSave();
-    setDialogMessage("#map-save-message", "개인 지도 목록에 저장했습니다.", "success");
-    window.setTimeout(() => document.querySelector<HTMLDialogElement>("#map-save-dialog")!.close(), 450);
+    if (showDialog) {
+      setDialogMessage("#map-save-message", "개인 지도 목록에 저장했습니다.", "success");
+      window.setTimeout(() => document.querySelector<HTMLDialogElement>("#map-save-dialog")!.close(), 450);
+    } else {
+      document.querySelector("#save-status")!.textContent = "Map saved.";
+    }
   } catch (error) {
-    setDialogMessage("#map-save-message", error instanceof Error ? error.message : "지도를 저장하지 못했습니다.", "error");
+    if (showDialog) {
+      setDialogMessage("#map-save-message", error instanceof Error ? error.message : "지도를 저장하지 못했습니다.", "error");
+    } else {
+      document.querySelector("#save-status")!.textContent = error instanceof Error ? error.message : "Map save failed.";
+    }
   } finally {
-    button.disabled = false;
+    if (showDialog) button.disabled = false;
   }
 }
 function renderMapLibrary(items: readonly { id: string; name: string; createdAt?: string; updatedAt?: string }[]): void {
@@ -2663,6 +2968,19 @@ canvas.addEventListener("pointerdown", (event) => {
     beginPan(event);
     return;
   }
+  if (selectedLayer === "ground" && brushMode === "shape") {
+    if (event.button !== 0 && event.button !== 2) return;
+    const cell = getCell(event);
+    if (!cell) return;
+    event.preventDefault();
+    isDrawing = true;
+    strokeChanged = false;
+    lastPaintedCell = `${cell.column}:${cell.row}`;
+    shapeDrag = { start: cell, current: cell, erase: event.button === 2 };
+    canvas.setPointerCapture(event.pointerId);
+    render();
+    return;
+  }
   if (selectedLayer === "prop" && propMode === "move") {
     if (event.button !== 0) return;
     const cell = getCell(event);
@@ -2709,6 +3027,7 @@ canvas.addEventListener("pointercancel", (event) => {
   if (event.pointerType === "touch" && (isPinching || touchGestureLocked)) return;
   movingProp = null;
   movingImage = null;
+  shapeDrag = null;
   finishStroke();
   render();
   if (canvas.hasPointerCapture(event.pointerId)) canvas.releasePointerCapture(event.pointerId);
@@ -2745,6 +3064,18 @@ document.querySelectorAll<HTMLButtonElement>("[data-tile-elevation]").forEach((b
 document.querySelectorAll<HTMLButtonElement>("[data-ground]").forEach((button) => button.addEventListener("click", () => {
   selectedGround = button.dataset.ground as GroundType;
   document.querySelectorAll("[data-ground]").forEach((item) => item.classList.toggle("selected", item === button));
+}));
+document.querySelector<HTMLInputElement>("#brush-size-range")!.addEventListener("input", (event) => {
+  setBrushSize(Number((event.target as HTMLInputElement).value));
+});
+document.querySelector<HTMLInputElement>("#brush-size-number")!.addEventListener("input", (event) => {
+  setBrushSize(Number((event.target as HTMLInputElement).value));
+});
+document.querySelectorAll<HTMLButtonElement>("[data-brush-mode]").forEach((button) => button.addEventListener("click", () => {
+  setBrushMode(button.dataset.brushMode as BrushMode);
+}));
+document.querySelectorAll<HTMLButtonElement>("[data-brush-shape]").forEach((button) => button.addEventListener("click", () => {
+  setBrushShape(button.dataset.brushShape as BrushShape);
 }));
 document.querySelectorAll<HTMLButtonElement>("[data-prop]").forEach((button) => button.addEventListener("click", () => {
   selectedProp = button.dataset.prop as PropType;
@@ -2829,7 +3160,14 @@ document.querySelector("#export-png")!.addEventListener("click", () => {
   const wasVisible = gridVisible; gridVisible = false; render();
   canvas.toBlob((blob) => { if (blob) download(blob, "forest-map.png"); gridVisible = wasVisible; render(); }, "image/png");
 });
-document.querySelector("#save-map")!.addEventListener("click", () => openMapSaveDialog(false));
+document.querySelector("#save-map")!.addEventListener("click", () => {
+  if (savedMapId) {
+    setFileMenuOpen(false);
+    void saveMapToCloud(false);
+  } else {
+    openMapSaveDialog(false);
+  }
+});
 document.querySelector("#save-map-as")!.addEventListener("click", () => openMapSaveDialog(true));
 document.querySelector("#open-map-library")!.addEventListener("click", () => { void openMapLibrary(); });
 document.querySelector("#open-image-library")!.addEventListener("click", () => { window.location.assign("/images/"); });
@@ -2939,6 +3277,8 @@ document.querySelector("#logout")!.addEventListener("click", async () => {
 window.addEventListener("keydown", (event) => {
   if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === "z") { event.preventDefault(); event.shiftKey ? redo() : undo(); }
 });
+setBrushSize(brushSize);
+setBrushMode(brushMode);
 setPropMode(propMode);
 setImageMode(imageMode);
 syncImageTransformControls();

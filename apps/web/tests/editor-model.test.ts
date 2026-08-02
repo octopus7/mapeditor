@@ -40,6 +40,8 @@ describe("editor model", () => {
     expect(setTileElevation(map, 0, 0, 1)).toBe(true);
     expect(map.cells[0]).toMatchObject({ ground: "stone", elevation: 1 });
     expect(setTileElevation(map, 0, 0, 1)).toBe(false);
+    expect(setTileElevation(map, 0, 0, 2)).toBe(true);
+    expect(map.cells[0].elevation).toBe(2);
 
     expect(paintGround(map, 0, 0, "water")).toBe(true);
     expect(map.cells[0].elevation).toBe(0);

@@ -82,13 +82,22 @@ button:focus-visible, input:focus-visible, canvas:focus-visible { outline: 3px s
 .ground-swatch { position: relative; width: 37px; height: 37px; overflow: hidden; border: 1px solid rgba(44, 65, 48, .18); border-radius: 7px; box-shadow: inset 0 0 9px rgba(255,255,255,.2); }
 .ground-swatch::after { content: ""; position: absolute; inset: 0; opacity: .24; background-image: radial-gradient(circle at 28% 30%, #fff 0 1px, transparent 1.5px), radial-gradient(circle at 70% 68%, #182e20 0 1px, transparent 1.5px); background-size: 13px 11px; }
 .ground-swatch.grass { background: #6a9655; }.ground-swatch.dirt { background: #a77d4c; }.ground-swatch.stone { background: #82877c; }.ground-swatch.water { background: #3d8b9b; }
-.tile-elevation-list { display: grid; gap: 7px; }
-.tile-elevation-option { width: 100%; display: grid; grid-template-columns: 37px 1fr; gap: 10px; align-items: center; padding: 8px; border: 1px solid transparent; border-radius: 9px; background: transparent; text-align: left; cursor: pointer; }
+.tile-elevation-list { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 6px; }
+.tile-elevation-option { width: 100%; min-width: 0; display: flex; flex-direction: column; gap: 7px; align-items: center; padding: 8px 4px; border: 1px solid transparent; border-radius: 9px; background: transparent; text-align: center; cursor: pointer; }
 .tile-elevation-option:hover { background: #f0f1e9; }.tile-elevation-option.selected { border-color: #9eae9d; background: #edf1e8; }
-.tile-elevation-option strong, .tile-elevation-option small { display: block; }.tile-elevation-option strong { font-size: 12px; }.tile-elevation-option small { margin-top: 2px; color: #949b95; font-size: 9px; }
+.tile-elevation-option strong, .tile-elevation-option small { display: block; }.tile-elevation-option strong { font-size: 11px; white-space: nowrap; }.tile-elevation-option small { min-height: 22px; margin-top: 2px; color: #949b95; font-size: 8px; line-height: 1.35; }
 .tile-elevation-icon { position: relative; width: 37px; height: 37px; border: 1px solid rgba(44, 65, 48, .18); border-radius: 7px; background: #6a9655; box-shadow: inset 0 0 9px rgba(255,255,255,.2); }
 .tile-elevation-icon::after { content: ""; position: absolute; right: -5px; bottom: -5px; width: 100%; height: 5px; border-radius: 0 0 3px 0; background: #4a321f; }.tile-elevation-icon::before { content: ""; position: absolute; top: 0; right: -5px; width: 5px; height: 100%; border-radius: 0 3px 0 0; background: #3f2c1e; }
 .tile-elevation-icon.base::before, .tile-elevation-icon.base::after { display: none; }.tile-elevation-hint { margin: 13px 2px 0; color: #8b948d; font-size: 9px; line-height: 1.5; }
+.tile-elevation-icon.two::after { height: 10px; box-shadow: 0 -5px 0 #5b3b25; }
+.brush-size-control { margin-top: 17px; padding-top: 13px; border-top: 1px solid #e1e3da; }
+.brush-size-row { display: flex; align-items: center; gap: 8px; }
+.brush-size-row .transform-range { min-width: 0; margin-top: 0; }
+.brush-size-number { width: 48px; min-height: 30px; padding: 4px 5px; border: 1px solid #cdd2ca; border-radius: 6px; color: #38533f; background: #fff; text-align: center; font-size: 11px; font-weight: 700; }
+.brush-tool-list, .brush-shape-list { display: grid; grid-template-columns: repeat(2, 1fr); gap: 4px; margin-top: 9px; padding: 3px; border-radius: 8px; background: #e8e9df; }
+.brush-tool, .brush-shape { min-height: 28px; padding: 0 4px; border: 0; border-radius: 6px; color: #7d887f; background: transparent; cursor: pointer; font-size: 9px; font-weight: 700; }
+.brush-tool.active, .brush-shape.active { color: #294434; background: #fff; box-shadow: 0 2px 7px rgba(43, 59, 46, .1); }
+.brush-size-hint { min-height: 22px; margin: 8px 2px 0; color: #8b948d; font-size: 9px; line-height: 1.4; }
 .prop-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 7px; }
 .prop-option { min-height: 91px; padding: 5px; overflow: hidden; border: 1px solid #dedfd6; border-radius: 9px; background: #f1f1e9; cursor: pointer; }
 .prop-option.selected { border-color: #6e8c71; box-shadow: inset 0 0 0 1px #6e8c71; background: #e8eee4; }

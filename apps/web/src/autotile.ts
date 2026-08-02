@@ -37,6 +37,13 @@ const CARDINAL_DIRECTIONS = [
   { column: -1, row: 0, bit: NEIGHBOR_MASK.W },
 ] as const;
 
+const DIAGONAL_DIRECTIONS = [
+  { column: 1, row: -1, bit: NEIGHBOR_MASK.NE, adjacent: NEIGHBOR_MASK.N | NEIGHBOR_MASK.E },
+  { column: 1, row: 1, bit: NEIGHBOR_MASK.SE, adjacent: NEIGHBOR_MASK.S | NEIGHBOR_MASK.E },
+  { column: -1, row: 1, bit: NEIGHBOR_MASK.SW, adjacent: NEIGHBOR_MASK.S | NEIGHBOR_MASK.W },
+  { column: -1, row: -1, bit: NEIGHBOR_MASK.NW, adjacent: NEIGHBOR_MASK.N | NEIGHBOR_MASK.W },
+] as const;
+
 export const GROUND_PRIORITY: Readonly<Record<GroundType, number>> = {
   grass: 0,
   dirt: 1,
@@ -142,7 +149,11 @@ function getOppositeNeighborBit(bit: number): number {
   if (bit === NEIGHBOR_MASK.N) return NEIGHBOR_MASK.S;
   if (bit === NEIGHBOR_MASK.E) return NEIGHBOR_MASK.W;
   if (bit === NEIGHBOR_MASK.S) return NEIGHBOR_MASK.N;
-  return NEIGHBOR_MASK.E;
+  if (bit === NEIGHBOR_MASK.W) return NEIGHBOR_MASK.E;
+  if (bit === NEIGHBOR_MASK.NE) return NEIGHBOR_MASK.SW;
+  if (bit === NEIGHBOR_MASK.SE) return NEIGHBOR_MASK.NW;
+  if (bit === NEIGHBOR_MASK.SW) return NEIGHBOR_MASK.NE;
+  return NEIGHBOR_MASK.SE;
 }
 
 /**
@@ -180,7 +191,32 @@ export function getTransitionCorrections(
         priority: GROUND_PRIORITY[targetGround],
       };
     });
-  return corrections.filter((correction): correction is TransitionCorrection => correction !== null);
+  const cornerCorrections: Array<TransitionCorrection | null> = DIAGONAL_DIRECTIONS
+    .map((direction) => {
+      const targetColumn = column + direction.column;
+      const targetRow = row + direction.row;
+      if (!isInside(map, targetColumn, targetRow)) return null;
+      const targetGround = map.cells[cellIndex(map, targetColumn, targetRow)].ground;
+      if (
+        targetGround === "water" ||
+        GROUND_PRIORITY[targetGround] <= sourcePriority ||
+        (sourceGround === "grass" && targetGround === "dirt")
+      ) return null;
+      const adjacentGrounds = [
+        map.cells[cellIndex(map, column + direction.column, row)].ground,
+        map.cells[cellIndex(map, column, row + direction.row)].ground,
+      ];
+      if (adjacentGrounds.some((ground) => ground !== targetGround)) return null;
+      return {
+        ground: sourceGround,
+        targetColumn,
+        targetRow,
+        mask: getOppositeNeighborBit(direction.bit),
+        priority: GROUND_PRIORITY[targetGround],
+      };
+    });
+  return [...corrections, ...cornerCorrections]
+    .filter((correction): correction is TransitionCorrection => correction !== null);
 }
 
 /**
@@ -233,6 +269,27 @@ export function getWaterBankMask(
   if (!isInside(map, column, row)) return 0;
   if (map.cells[cellIndex(map, column, row)].ground === "water") return 0;
   return getCardinalNeighborMask(map, column, row, "water");
+}
+
+/** Returns diagonal water corners only when both touching cardinal cells are water. */
+export function getWaterBankCornerMask(
+  map: MapDocument,
+  column: number,
+  row: number,
+): number {
+  if (!isInside(map, column, row)) return 0;
+  if (map.cells[cellIndex(map, column, row)].ground === "water") return 0;
+  return DIAGONAL_DIRECTIONS.reduce((result, direction) => {
+    const targetColumn = column + direction.column;
+    const targetRow = row + direction.row;
+    if (!isInside(map, targetColumn, targetRow)) return result;
+    if (map.cells[cellIndex(map, targetColumn, targetRow)].ground !== "water") return result;
+    const adjacentGrounds = [
+      map.cells[cellIndex(map, column + direction.column, row)].ground,
+      map.cells[cellIndex(map, column, row + direction.row)].ground,
+    ];
+    return adjacentGrounds.every((ground) => ground === "water") ? result | direction.bit : result;
+  }, 0);
 }
 
 /** Returns each water cell's cardinal distance from a land or map boundary. */
