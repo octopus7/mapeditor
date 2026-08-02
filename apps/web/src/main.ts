@@ -12,6 +12,7 @@ import {
   getPropNeighborMask,
   getTransitionCorrections,
   getWaterBankMask,
+  getWaterDepths,
   NEIGHBOR_MASK,
   type BridgeDirection,
 } from "./autotile";
@@ -104,6 +105,7 @@ type MovingImage = {
 };
 
 let map = restoreDraft() ?? createInitialMap();
+let waterDepths: number[] = [];
 let savedMapId: string | null = null;
 let selectedLayer: Layer = "ground";
 let selectedGroundEditTab: GroundEditTab = "terrain";
@@ -520,7 +522,15 @@ function drawGroundTexture(column: number, row: number, ground: GroundType): voi
   const x = column * CELL_SIZE;
   const y = row * CELL_SIZE;
   const noise = colorNoise(column, row);
-  const [r, g, b] = groundPalettes[ground];
+  let [r, g, b] = groundPalettes[ground];
+  if (ground === "water") {
+    const depth = Math.min(Math.max(waterDepths[cellIndex(map, column, row)] ?? 0, 0), 8);
+    const depthRatio = depth / 8;
+    const deepWater: [number, number, number] = [22, 83, 101];
+    r = Math.round(r * (1 - depthRatio * .72) + deepWater[0] * (depthRatio * .72));
+    g = Math.round(g * (1 - depthRatio * .72) + deepWater[1] * (depthRatio * .72));
+    b = Math.round(b * (1 - depthRatio * .72) + deepWater[2] * (depthRatio * .72));
+  }
   context.fillStyle = `rgb(${r + noise}, ${g + noise}, ${b + noise})`;
   context.fillRect(x, y, CELL_SIZE, CELL_SIZE);
   context.save(); context.globalAlpha = 0.22;
@@ -887,7 +897,24 @@ function drawImagePlacement(placement: MapImagePlacement, opacity = 1, selected 
   }
   context.restore();
 }
+function drawImagePlacementAnchors(): void {
+  if (selectedLayer !== "image" || (imageMode !== "move" && imageMode !== "erase")) return;
+  context.save();
+  context.fillStyle = "rgba(42, 83, 59, .16)";
+  context.strokeStyle = "rgba(42, 83, 59, .46)";
+  context.lineWidth = 1.5;
+  for (const placement of map.images) {
+    const centerX = placement.column * CELL_SIZE + CELL_SIZE / 2;
+    const centerY = placement.row * CELL_SIZE + CELL_SIZE / 2;
+    context.beginPath();
+    context.arc(centerX, centerY, CELL_SIZE * .22, 0, Math.PI * 2);
+    context.fill();
+    context.stroke();
+  }
+  context.restore();
+}
 function render(): void {
+  waterDepths = getWaterDepths(map);
   context.clearRect(0, 0, canvas.width, canvas.height);
   for (let row = 0; row < map.rows; row += 1) for (let column = 0; column < map.columns; column += 1) {
     drawGround(column, row, map.cells[cellIndex(map, column, row)].ground);
@@ -916,6 +943,7 @@ function render(): void {
       drawImagePlacement({ ...image, column: movingImage.target.column, row: movingImage.target.row }, .62, true);
     }
   }
+  drawImagePlacementAnchors();
   if (gridVisible) {
     context.save(); context.strokeStyle = "rgba(21,45,29,.17)"; context.lineWidth = 1; context.beginPath();
     for (let column = 0; column <= map.columns; column += 1) { context.moveTo(column * CELL_SIZE + .5, 0); context.lineTo(column * CELL_SIZE + .5, canvas.height); }

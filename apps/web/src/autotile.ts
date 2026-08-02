@@ -235,6 +235,40 @@ export function getWaterBankMask(
   return getCardinalNeighborMask(map, column, row, "water");
 }
 
+/** Returns each water cell's cardinal distance from a land or map boundary. */
+export function getWaterDepths(map: MapDocument): number[] {
+  const depths = new Array<number>(map.cells.length).fill(-1);
+  const queue: number[] = [];
+  for (let row = 0; row < map.rows; row += 1) for (let column = 0; column < map.columns; column += 1) {
+    if (map.cells[cellIndex(map, column, row)].ground !== "water") continue;
+    const isSurface = CARDINAL_DIRECTIONS.some((direction) => {
+      const targetColumn = column + direction.column;
+      const targetRow = row + direction.row;
+      return !isInside(map, targetColumn, targetRow)
+        || map.cells[cellIndex(map, targetColumn, targetRow)].ground !== "water";
+    });
+    if (!isSurface) continue;
+    const index = cellIndex(map, column, row);
+    depths[index] = 0;
+    queue.push(index);
+  }
+  for (let head = 0; head < queue.length; head += 1) {
+    const index = queue[head];
+    const column = index % map.columns;
+    const row = Math.floor(index / map.columns);
+    for (const direction of CARDINAL_DIRECTIONS) {
+      const targetColumn = column + direction.column;
+      const targetRow = row + direction.row;
+      if (!isInside(map, targetColumn, targetRow)) continue;
+      const targetIndex = cellIndex(map, targetColumn, targetRow);
+      if (map.cells[targetIndex].ground !== "water" || depths[targetIndex] >= 0) continue;
+      depths[targetIndex] = depths[index] + 1;
+      queue.push(targetIndex);
+    }
+  }
+  return depths;
+}
+
 export type BridgeConnectionShape =
   | "isolated"
   | "horizontal"

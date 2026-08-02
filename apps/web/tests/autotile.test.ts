@@ -12,6 +12,7 @@ import {
   getNeighborMask,
   getTransitionLayers,
   getWaterBankMask,
+  getWaterDepths,
   normalizeBlobMask,
 } from "../src/autotile";
 import { type GroundType, type MapDocument } from "../src/editor-model";
@@ -155,6 +156,21 @@ describe("autotile calculations", () => {
       NEIGHBOR_MASK.N | NEIGHBOR_MASK.E | NEIGHBOR_MASK.S | NEIGHBOR_MASK.W,
     );
     expect(getWaterBankMask(map, 1, 0)).toBe(0);
+  });
+
+  it("increases water depth away from the land boundary", () => {
+    const map = createMap([
+      ["grass", "grass", "grass", "grass", "grass"],
+      ["grass", "water", "water", "water", "grass"],
+      ["grass", "water", "water", "water", "grass"],
+      ["grass", "water", "water", "water", "grass"],
+      ["grass", "grass", "grass", "grass", "grass"],
+    ]);
+
+    const depths = getWaterDepths(map);
+    expect(depths[6]).toBe(0);
+    expect(depths[12]).toBe(1);
+    expect(depths[8]).toBe(0);
   });
 
   it("does not create a water bank from a diagonal-only neighbor", () => {
