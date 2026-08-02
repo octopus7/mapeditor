@@ -6,6 +6,8 @@ export type GroundType = (typeof groundTypes)[number];
 
 export const tileElevations = [0, 1, 2] as const;
 export type TileElevation = (typeof tileElevations)[number];
+export const brightnessCorrections = [0, 1, 2, 3] as const;
+export type BrightnessCorrection = (typeof brightnessCorrections)[number];
 
 export const propTypes = [
   "broadleaf-tree",
@@ -20,6 +22,7 @@ export type PropType = (typeof propTypes)[number];
 export interface MapCell {
   ground: GroundType;
   elevation: TileElevation;
+  brightnessCorrection: BrightnessCorrection;
   prop: PropType | null;
 }
 
@@ -65,11 +68,18 @@ export function paintGround(
   column: number,
   row: number,
   ground: GroundType,
+  brightnessCorrection: BrightnessCorrection = 0,
 ): boolean {
   if (!isInside(map, column, row)) return false;
+  if (!brightnessCorrections.includes(brightnessCorrection)) return false;
   const cell = map.cells[cellIndex(map, column, row)];
-  if (cell.ground === ground && (ground !== "water" || cell.elevation === 0)) return false;
+  if (
+    cell.ground === ground &&
+    cell.brightnessCorrection === brightnessCorrection &&
+    (ground !== "water" || cell.elevation === 0)
+  ) return false;
   cell.ground = ground;
+  cell.brightnessCorrection = brightnessCorrection;
   if (ground === "water") cell.elevation = 0;
   map.updatedAt = new Date().toISOString();
   return true;
@@ -187,7 +197,7 @@ export function moveProp(
 export function clearGround(map: MapDocument): MapDocument {
   return {
     ...map,
-    cells: map.cells.map(() => ({ ground: "grass", elevation: 0, prop: null })),
+    cells: map.cells.map(() => ({ ground: "grass", elevation: 0, brightnessCorrection: 0, prop: null })),
     updatedAt: new Date().toISOString(),
   };
 }
@@ -201,6 +211,7 @@ export function createInitialMap(): MapDocument {
     cells: Array.from({ length: GRID_COLUMNS * GRID_ROWS }, () => ({
       ground: "grass" as GroundType,
       elevation: 0 as TileElevation,
+      brightnessCorrection: 0 as BrightnessCorrection,
       prop: null,
     })),
     images: [],
@@ -285,9 +296,12 @@ export function deserializeMap(value: string): MapDocument | null {
       if (cell.prop !== null && !propTypes.includes(cell.prop as PropType)) return null;
       const elevation = cell.elevation === undefined ? 0 : cell.elevation;
       if (!tileElevations.includes(elevation as TileElevation) || !Number.isInteger(elevation)) return null;
+      const brightnessCorrection = cell.brightnessCorrection === undefined ? 0 : cell.brightnessCorrection;
+      if (!brightnessCorrections.includes(brightnessCorrection as BrightnessCorrection) || !Number.isInteger(brightnessCorrection)) return null;
       cells.push({
         ground: cell.ground as GroundType,
         elevation: cell.ground === "water" ? 0 : elevation as TileElevation,
+        brightnessCorrection: brightnessCorrection as BrightnessCorrection,
         prop: cell.prop as PropType | null,
       });
     }

@@ -29,6 +29,9 @@ describe("editor model", () => {
   it("paints ground and places props only inside the map", () => {
     const map = createInitialMap();
     expect(paintGround(map, 0, 0, "dirt")).toBe(true);
+    expect(map.cells[0].brightnessCorrection).toBe(0);
+    expect(paintGround(map, 0, 0, "dirt", 3)).toBe(true);
+    expect(map.cells[0].brightnessCorrection).toBe(3);
     expect(placeProp(map, 0, 0, "shrub")).toBe(true);
     expect(paintGround(map, -1, 0, "water")).toBe(false);
     expect(placeProp(map, map.columns, 0, "boulder")).toBe(false);

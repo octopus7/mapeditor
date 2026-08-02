@@ -2,7 +2,7 @@ import "./styles.css";
 import {
   cellIndex, cloneMap, createInitialMap, deserializeMap, IMAGE_MAX_SCALE, IMAGE_MIN_SCALE, moveImage,
   moveProp, paintGround, placeImage, placeProp, removeImage, serializeMap, setTileElevation, updateImageTransform,
-  type GroundType, type MapDocument, type MapImagePlacement, type PropType, type TileElevation,
+  type BrightnessCorrection, type GroundType, type MapDocument, type MapImagePlacement, type PropType, type TileElevation,
 } from "./editor-model";
 import {
   getBridgeConnectionDirections,
@@ -119,6 +119,7 @@ let savedMapId: string | null = null;
 let selectedLayer: Layer = "ground";
 let selectedGroundEditTab: GroundEditTab = "terrain";
 let selectedGround: GroundType = "grass";
+let selectedGroundBrightness: BrightnessCorrection = 0;
 let selectedTileElevation: TileElevation = 1;
 let selectedProp: PropType = "broadleaf-tree";
 let gridVisible = true;
@@ -227,6 +228,15 @@ document.querySelector<HTMLDivElement>("#app")!.innerHTML = `
                 <span class="ground-swatch ${item.id}"></span>
                 <span><strong>${item.label}</strong><small>${item.hint}</small></span><span class="check">✓</span>
               </button>`).join("")}
+          </div>
+          <div class="brightness-correction-control">
+            <div class="section-label"><span>BRIGHTNESS</span><output id="brightness-correction-output">0</output></div>
+            <div class="brightness-correction-list" role="radiogroup" aria-label="명도 보정 단계">
+              ${[0, 1, 2, 3].map((level) => `
+                <button class="brightness-correction-option ${level === 0 ? "selected" : ""}" type="button" data-ground-brightness="${level}" role="radio" aria-checked="${level === 0}">
+                  <span class="brightness-correction-swatch level-${level}" aria-hidden="true"></span><strong>${level}</strong>
+                </button>`).join("")}
+            </div>
           </div>
           </section>
           <section class="hidden" id="elevation-palette">
@@ -522,6 +532,14 @@ const canvas = document.querySelector<HTMLCanvasElement>("#map-canvas")!;
 const canvasFrame = document.querySelector<HTMLDivElement>("#canvas-frame")!;
 const canvasScroll = document.querySelector<HTMLDivElement>(".canvas-scroll")!;
 const context = canvas.getContext("2d")!;
+const groundTextureCanvas = document.createElement("canvas");
+groundTextureCanvas.width = CELL_SIZE;
+groundTextureCanvas.height = CELL_SIZE;
+const groundTextureContext = groundTextureCanvas.getContext("2d")!;
+groundTextureContext.imageSmoothingEnabled = false;
+const groundTextureImage = groundTextureContext.createImageData(CELL_SIZE, CELL_SIZE);
+const brightnessCorrectionCanvas = document.createElement("canvas");
+const brightnessCorrectionContext = brightnessCorrectionCanvas.getContext("2d")!;
 function syncCanvasSize(): void {
   canvas.width = map.columns * CELL_SIZE;
   canvas.height = map.rows * CELL_SIZE;
@@ -545,39 +563,62 @@ function escapeHtml(value: string): string {
   const characters: Record<string, string> = { "&": "&amp;", "<": "&lt;", ">": "&gt;", "'": "&#039;", '"': "&quot;" };
   return value.replace(/[&<>'"]/g, (character) => characters[character]);
 }
-const GROUND_NOISE_PATTERN_SIZE = 32;
+const GROUND_NOISE_TEXTURE_SIZE = 256;
+const GROUND_NOISE_GRID_SIZE = 32;
 const GROUND_NOISE_PATTERN_SEED = 0x6d617065;
-function createGroundNoisePattern(): Int8Array {
-  const pattern = new Int8Array(GROUND_NOISE_PATTERN_SIZE * GROUND_NOISE_PATTERN_SIZE);
+function createGroundNoiseTexture(): Int8Array {
+  const coarsePattern = new Int8Array(GROUND_NOISE_GRID_SIZE * GROUND_NOISE_GRID_SIZE);
   let state = GROUND_NOISE_PATTERN_SEED;
-  for (let index = 0; index < pattern.length; index += 1) {
+  for (let index = 0; index < coarsePattern.length; index += 1) {
     state ^= state << 13;
     state ^= state >>> 17;
     state ^= state << 5;
     state >>>= 0;
-    pattern[index] = (state % 11) - 5;
+    coarsePattern[index] = (state % 11) - 5;
   }
-  return pattern;
+  const texture = new Int8Array(GROUND_NOISE_TEXTURE_SIZE * GROUND_NOISE_TEXTURE_SIZE);
+  const sampleStep = GROUND_NOISE_TEXTURE_SIZE / GROUND_NOISE_GRID_SIZE;
+  const smoothStep = (value: number): number => value * value * (3 - 2 * value);
+  for (let y = 0; y < GROUND_NOISE_TEXTURE_SIZE; y += 1) {
+    const gridY = y / sampleStep;
+    const gridY0 = Math.floor(gridY) % GROUND_NOISE_GRID_SIZE;
+    const gridY1 = (gridY0 + 1) % GROUND_NOISE_GRID_SIZE;
+    const yWeight = smoothStep(gridY - Math.floor(gridY));
+    for (let x = 0; x < GROUND_NOISE_TEXTURE_SIZE; x += 1) {
+      const gridX = x / sampleStep;
+      const gridX0 = Math.floor(gridX) % GROUND_NOISE_GRID_SIZE;
+      const gridX1 = (gridX0 + 1) % GROUND_NOISE_GRID_SIZE;
+      const xWeight = smoothStep(gridX - Math.floor(gridX));
+      const top = coarsePattern[gridY0 * GROUND_NOISE_GRID_SIZE + gridX0] * (1 - xWeight)
+        + coarsePattern[gridY0 * GROUND_NOISE_GRID_SIZE + gridX1] * xWeight;
+      const bottom = coarsePattern[gridY1 * GROUND_NOISE_GRID_SIZE + gridX0] * (1 - xWeight)
+        + coarsePattern[gridY1 * GROUND_NOISE_GRID_SIZE + gridX1] * xWeight;
+      texture[y * GROUND_NOISE_TEXTURE_SIZE + x] = Math.round(top * (1 - yWeight) + bottom * yWeight);
+    }
+  }
+  return texture;
 }
-const GROUND_NOISE_PATTERN = createGroundNoisePattern();
+const GROUND_NOISE_TEXTURE = createGroundNoiseTexture();
+function textureNoise(x: number, y: number): number {
+  const textureX = ((x % GROUND_NOISE_TEXTURE_SIZE) + GROUND_NOISE_TEXTURE_SIZE) % GROUND_NOISE_TEXTURE_SIZE;
+  const textureY = ((y % GROUND_NOISE_TEXTURE_SIZE) + GROUND_NOISE_TEXTURE_SIZE) % GROUND_NOISE_TEXTURE_SIZE;
+  return GROUND_NOISE_TEXTURE[textureY * GROUND_NOISE_TEXTURE_SIZE + textureX];
+}
 function colorNoise(column: number, row: number): number {
-  const patternColumn = ((column % GROUND_NOISE_PATTERN_SIZE) + GROUND_NOISE_PATTERN_SIZE) % GROUND_NOISE_PATTERN_SIZE;
-  const patternRow = ((row % GROUND_NOISE_PATTERN_SIZE) + GROUND_NOISE_PATTERN_SIZE) % GROUND_NOISE_PATTERN_SIZE;
-  return GROUND_NOISE_PATTERN[patternRow * GROUND_NOISE_PATTERN_SIZE + patternColumn];
+  return textureNoise(column * CELL_SIZE, row * CELL_SIZE);
 }
 const groundPalettes: Record<GroundType, [number, number, number]> = {
   grass: [104, 151, 85], dirt: [162, 126, 79], stone: [127, 132, 121], water: [58, 137, 153],
 };
 function mixGroundColor(palette: [number, number, number], noise: number): [number, number, number] {
-  const amount = Math.min(Math.abs(noise), 5) / 5 * .045;
+  const amount = Math.min(Math.abs(noise), 5) / 5 * .03;
   const target = noise >= 0 ? 255 : 0;
   return palette.map((channel) => Math.round(channel * (1 - amount) + target * amount)) as [number, number, number];
 }
 function drawGroundTexture(column: number, row: number, ground: GroundType): void {
   const x = column * CELL_SIZE;
   const y = row * CELL_SIZE;
-  const noise = colorNoise(column, row);
-  let [r, g, b] = mixGroundColor(groundPalettes[ground], noise);
+  let [r, g, b] = groundPalettes[ground];
   if (ground === "water") {
     const depth = Math.min(Math.max(waterDepths[cellIndex(map, column, row)] ?? 0, 0), 8);
     const depthRatio = depth / 8;
@@ -586,8 +627,18 @@ function drawGroundTexture(column: number, row: number, ground: GroundType): voi
     g = Math.round(g * (1 - depthRatio * .72) + deepWater[1] * (depthRatio * .72));
     b = Math.round(b * (1 - depthRatio * .72) + deepWater[2] * (depthRatio * .72));
   }
-  context.fillStyle = `rgb(${r + noise}, ${g + noise}, ${b + noise})`;
-  context.fillRect(x, y, CELL_SIZE, CELL_SIZE);
+  const baseColor: [number, number, number] = [r, g, b];
+  const pixels = groundTextureImage.data;
+  for (let localY = 0; localY < CELL_SIZE; localY += 1) for (let localX = 0; localX < CELL_SIZE; localX += 1) {
+    const [pixelR, pixelG, pixelB] = mixGroundColor(baseColor, textureNoise(x + localX, y + localY));
+    const pixelIndex = (localY * CELL_SIZE + localX) * 4;
+    pixels[pixelIndex] = pixelR;
+    pixels[pixelIndex + 1] = pixelG;
+    pixels[pixelIndex + 2] = pixelB;
+    pixels[pixelIndex + 3] = 255;
+  }
+  groundTextureContext.putImageData(groundTextureImage, 0, 0);
+  context.drawImage(groundTextureCanvas, x, y);
   context.save(); context.globalAlpha = 0.22;
   if (ground === "grass") {
     context.strokeStyle = "#d9e6a2"; context.beginPath();
@@ -692,27 +743,25 @@ function drawWaterBankCornerFace(column: number, row: number, ground: GroundType
         : "SE";
   const x = targetColumn * CELL_SIZE;
   const y = targetRow * CELL_SIZE;
-  const edge = CELL_SIZE * .25;
+  const edge = CELL_SIZE / 8;
   const [r, g, b] = waterBankPalettes[ground];
   const soil = `rgb(${r}, ${g}, ${b})`;
   const dark = `rgb(${Math.round(r * .58)}, ${Math.round(g * .58)}, ${Math.round(b * .58)})`;
   context.save();
-  context.globalAlpha = .92;
-  context.fillStyle = soil;
-  context.strokeStyle = dark;
-  context.lineWidth = 1;
   context.beginPath();
-  if (targetCorner === "NE") {
-    context.moveTo(x + CELL_SIZE, y); context.lineTo(x + CELL_SIZE, y + edge); context.lineTo(x + CELL_SIZE - edge, y); context.closePath();
-  } else if (targetCorner === "SE") {
-    context.moveTo(x + CELL_SIZE, y + CELL_SIZE); context.lineTo(x + CELL_SIZE - edge, y + CELL_SIZE); context.lineTo(x + CELL_SIZE, y + CELL_SIZE - edge); context.closePath();
-  } else if (targetCorner === "SW") {
-    context.moveTo(x, y + CELL_SIZE); context.lineTo(x, y + CELL_SIZE - edge); context.lineTo(x + edge, y + CELL_SIZE); context.closePath();
-  } else {
-    context.moveTo(x, y); context.lineTo(x + edge, y); context.lineTo(x, y + edge); context.closePath();
-  }
+  context.rect(x, y, CELL_SIZE, CELL_SIZE);
+  context.clip();
+  const centerX = targetCorner.includes("E") ? x + CELL_SIZE : x;
+  const centerY = targetCorner.includes("S") ? y + CELL_SIZE : y;
+  const gradient = context.createRadialGradient(centerX, centerY, 0, centerX, centerY, edge * 1.8);
+  gradient.addColorStop(0, dark);
+  gradient.addColorStop(.52, soil);
+  gradient.addColorStop(1, "rgba(0, 0, 0, 0)");
+  context.globalAlpha = .78;
+  context.fillStyle = gradient;
+  context.beginPath();
+  context.arc(centerX, centerY, edge * 1.8, 0, Math.PI * 2);
   context.fill();
-  context.stroke();
   context.restore();
 }
 function drawWaterBankCorners(column: number, row: number, ground: GroundType, mask: number): void {
@@ -751,7 +800,12 @@ function drawRaisedTileFace(column: number, row: number, ground: GroundType, ele
   context.lineWidth = 1;
   if (direction === "S") {
     context.beginPath();
-    context.moveTo(x, faceY + faceDepth - 1); context.lineTo(x + CELL_SIZE, faceY + faceDepth - 1);
+    context.moveTo(x, faceY + faceDepth - 1);
+    for (let segment = 1; segment <= 6; segment += 1) {
+      const segmentX = x + (CELL_SIZE * segment) / 6;
+      const uneven = colorNoise(column + segment, row + elevation) * .45;
+      context.lineTo(segmentX, faceY + faceDepth - 1 + uneven);
+    }
     context.stroke();
     context.strokeStyle = highlight;
     context.globalAlpha = .35;
@@ -759,27 +813,32 @@ function drawRaisedTileFace(column: number, row: number, ground: GroundType, ele
     context.moveTo(x, faceY + 1); context.lineTo(x + CELL_SIZE, faceY + 1);
     context.stroke();
     context.strokeStyle = dark;
-    context.globalAlpha = .44;
-    for (let band = 1; band <= 3; band += 1) {
-      const lineY = faceY + (faceDepth * band) / 4;
-      const wobble = colorNoise(column + band, row - band) * .35;
+    context.globalAlpha = .48;
+    const ridgeCount = elevation === 2 ? 7 : 4;
+    for (let ridge = 1; ridge <= ridgeCount; ridge += 1) {
+      const ridgeX = x + (CELL_SIZE * ridge) / (ridgeCount + 1);
+      const wobble = colorNoise(column + ridge, row - ridge) * .8;
       context.beginPath();
-      context.moveTo(x, lineY + wobble);
-      context.quadraticCurveTo(x + CELL_SIZE * .28, lineY - 2 + wobble, x + CELL_SIZE * .52, lineY + 1 - wobble);
-      context.quadraticCurveTo(x + CELL_SIZE * .78, lineY + 3 + wobble, x + CELL_SIZE, lineY - 1 + wobble);
+      context.moveTo(ridgeX + wobble, faceY + 2);
+      for (let segment = 1; segment <= 5; segment += 1) {
+        const segmentY = faceY + (faceDepth * segment) / 5;
+        const offset = colorNoise(column + ridge + segment, row + ridge) * .75;
+        context.lineTo(ridgeX + offset, segmentY);
+      }
       context.stroke();
     }
-    context.globalAlpha = .22;
-    for (let patch = 0; patch < 5; patch += 1) {
-      const patchX = x + 4 + ((column * 11 + row * 7 + patch * 17) % Math.max(8, CELL_SIZE - 12));
-      const patchY = faceY + 8 + ((row * 13 + column * 5 + patch * 11) % Math.max(8, faceDepth - 14));
-      const patchWidth = 5 + ((patch * 3 + column + row) % 7);
-      context.fillStyle = patch % 2 === 0 ? dark : highlight;
+    context.globalAlpha = .18;
+    for (let facet = 0; facet < ridgeCount - 1; facet += 1) {
+      const facetX = x + 3 + ((column * 9 + row * 5 + facet * 13) % Math.max(8, CELL_SIZE - 8));
+      const facetWidth = 3 + ((facet * 3 + column + row) % 5);
+      const facetTop = faceY + 5 + ((row + facet * 7) % 7);
+      const facetBottom = faceY + faceDepth - 4 - ((column + facet * 5) % 7);
+      context.fillStyle = facet % 2 === 0 ? dark : highlight;
       context.beginPath();
-      context.moveTo(patchX, patchY + 2);
-      context.lineTo(patchX + patchWidth * .42, patchY);
-      context.lineTo(patchX + patchWidth, patchY + 3);
-      context.lineTo(patchX + patchWidth * .62, patchY + 6);
+      context.moveTo(facetX, facetTop);
+      context.lineTo(facetX + facetWidth, facetTop + 2);
+      context.lineTo(facetX + facetWidth * .65, facetBottom);
+      context.lineTo(facetX - 1, facetBottom - 2);
       context.closePath();
       context.fill();
     }
@@ -850,6 +909,35 @@ function drawGroundCorrections(): void {
     const waterBankCornerMask = getWaterBankCornerMask(map, column, row);
     if (waterBankCornerMask) drawWaterBankCorners(column, row, ground, waterBankCornerMask);
   }
+}
+const brightnessCorrectionAlpha: Record<BrightnessCorrection, number> = {
+  0: 0,
+  1: .07,
+  2: .13,
+  3: .2,
+};
+const BRIGHTNESS_CORRECTION_INSET = CELL_SIZE / 8;
+function drawBrightnessCorrections(): void {
+  brightnessCorrectionCanvas.width = canvas.width;
+  brightnessCorrectionCanvas.height = canvas.height;
+  let hasCorrections = false;
+  for (let row = 0; row < map.rows; row += 1) for (let column = 0; column < map.columns; column += 1) {
+    const level = map.cells[cellIndex(map, column, row)].brightnessCorrection ?? 0;
+    if (level === 0) continue;
+    hasCorrections = true;
+    brightnessCorrectionContext.fillStyle = `rgba(255, 255, 255, ${brightnessCorrectionAlpha[level]})`;
+    brightnessCorrectionContext.fillRect(
+      column * CELL_SIZE + BRIGHTNESS_CORRECTION_INSET,
+      row * CELL_SIZE + BRIGHTNESS_CORRECTION_INSET,
+      CELL_SIZE - BRIGHTNESS_CORRECTION_INSET * 2,
+      CELL_SIZE - BRIGHTNESS_CORRECTION_INSET * 2,
+    );
+  }
+  if (!hasCorrections) return;
+  context.save();
+  context.filter = `blur(${BRIGHTNESS_CORRECTION_INSET}px)`;
+  context.drawImage(brightnessCorrectionCanvas, 0, 0);
+  context.restore();
 }
 function drawElevationHighlights(): void {
   if (selectedLayer !== "ground" || selectedGroundEditTab !== "elevation") return;
@@ -1084,6 +1172,7 @@ function render(): void {
     drawGround(column, row, map.cells[cellIndex(map, column, row)].ground);
   }
   drawGroundCorrections();
+  drawBrightnessCorrections();
   for (let row = 0; row < map.rows; row += 1) for (let column = 0; column < map.columns; column += 1) {
     drawRaisedTile(column, row);
   }
@@ -1387,7 +1476,13 @@ function applyGroundCells(candidate: MapDocument, cells: CellPosition[], erase: 
   for (const target of cells) {
     const nextChanged = selectedGroundEditTab === "elevation"
       ? setTileElevation(candidate, target.column, target.row, erase ? 0 : selectedTileElevation)
-      : paintGround(candidate, target.column, target.row, erase ? "grass" : selectedGround);
+      : paintGround(
+        candidate,
+        target.column,
+        target.row,
+        erase ? "grass" : selectedGround,
+        erase ? 0 : selectedGroundBrightness,
+      );
     changed = nextChanged || changed;
   }
   return changed;
@@ -2881,6 +2976,18 @@ function setGroundEditTab(tab: GroundEditTab): void {
   document.querySelector("#elevation-palette")?.classList.toggle("hidden", tab !== "elevation");
   render();
 }
+function setGroundBrightness(value: number): void {
+  if (!Number.isInteger(value) || value < 0 || value > 3) return;
+  selectedGroundBrightness = value as BrightnessCorrection;
+  document.querySelectorAll<HTMLButtonElement>("[data-ground-brightness]").forEach((button) => {
+    const active = Number(button.dataset.groundBrightness) === selectedGroundBrightness;
+    button.classList.toggle("selected", active);
+    button.setAttribute("aria-checked", String(active));
+  });
+  const output = document.querySelector<HTMLOutputElement>("#brightness-correction-output");
+  if (output) output.value = String(selectedGroundBrightness);
+  render();
+}
 function setTileElevationOption(elevation: TileElevation): void {
   selectedTileElevation = elevation;
   document.querySelectorAll<HTMLButtonElement>("[data-tile-elevation]").forEach((button) => {
@@ -3065,6 +3172,9 @@ document.querySelectorAll<HTMLButtonElement>("[data-ground]").forEach((button) =
   selectedGround = button.dataset.ground as GroundType;
   document.querySelectorAll("[data-ground]").forEach((item) => item.classList.toggle("selected", item === button));
 }));
+document.querySelectorAll<HTMLButtonElement>("[data-ground-brightness]").forEach((button) => button.addEventListener("click", () => {
+  setGroundBrightness(Number(button.dataset.groundBrightness));
+}));
 document.querySelector<HTMLInputElement>("#brush-size-range")!.addEventListener("input", (event) => {
   setBrushSize(Number((event.target as HTMLInputElement).value));
 });
@@ -3149,7 +3259,7 @@ document.querySelector("#toggle-pan")!.addEventListener("click", () => {
 });
 document.querySelector("#reset-map")!.addEventListener("click", () => { savedMapId = null; replaceMap(createInitialMap()); });
 document.querySelector("#clear-map")!.addEventListener("click", () => {
-  const next = createInitialMap(); next.name = "새로운 숲"; next.cells = next.cells.map(() => ({ ground: "grass", elevation: 0, prop: null })); savedMapId = null; replaceMap(next);
+  const next = createInitialMap(); next.name = "새로운 숲"; next.cells = next.cells.map(() => ({ ground: "grass", elevation: 0, brightnessCorrection: 0, prop: null })); savedMapId = null; replaceMap(next);
 });
 document.querySelector("#export-json")!.addEventListener("click", () => {
   setFileMenuOpen(false);

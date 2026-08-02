@@ -25,7 +25,7 @@ function createMap(rows: GroundType[][]): MapDocument {
     name: "autotile test",
     columns,
     rows: rows.length,
-    cells: rows.flatMap((row) => row.map((ground) => ({ ground, elevation: 0 as const, prop: null }))),
+    cells: rows.flatMap((row) => row.map((ground) => ({ ground, elevation: 0 as const, brightnessCorrection: 0 as const, prop: null }))),
     images: [],
     updatedAt: "2026-08-02T00:00:00.000Z",
   };
