@@ -31,6 +31,7 @@ button:focus-visible, input:focus-visible, canvas:focus-visible { outline: 3px s
 .auth-slot.auth-ready iframe { visibility: visible; }
 .auth-note { color: #889189; font-size: 10px; white-space: nowrap; }
 .auth-retry { min-height: 34px; padding: 0 10px; border: 1px dashed #bdc5bc; border-radius: 7px; color: #667269; background: transparent; cursor: pointer; font-size: 10px; }
+.login-trigger { min-width: 58px; }
 .profile-button { min-height: 38px; max-width: 200px; display: flex; align-items: center; gap: 8px; padding: 4px 10px 4px 5px; border: 1px solid #cdd3ca; border-radius: 20px; background: #fff; cursor: pointer; }
 .profile-button span { width: 28px; height: 28px; flex: none; display: grid; place-items: center; border-radius: 50%; color: #fff; background: #41684a; font-size: 12px; font-weight: 700; }
 .profile-button strong { overflow: hidden; color: #3f5145; font-size: 11px; text-overflow: ellipsis; white-space: nowrap; }
@@ -44,9 +45,11 @@ button:focus-visible, input:focus-visible, canvas:focus-visible { outline: 3px s
 .file-menu-wrap { position: relative; flex: none; }
 .file-menu-toggle { width: 37px; height: 37px; color: #31583a; border-color: #9eaf9e; background: #e7ece3; font-size: 16px; line-height: 1; }
 .file-menu-toggle[aria-expanded="true"] { color: #f5f5eb; border-color: #315a3d; background: #315a3d; }
-.file-menu { position: absolute; top: calc(100% + 9px); right: 0; z-index: 30; width: 178px; display: grid; gap: 7px; padding: 11px; border: 1px solid #d4d8ce; border-radius: 10px; background: #fbfaf4; box-shadow: 0 15px 30px rgba(33, 51, 38, .17), 0 2px 5px rgba(33, 51, 38, .08); }
+.file-menu { position: absolute; top: calc(100% + 9px); right: 0; z-index: 30; width: 220px; display: grid; gap: 7px; padding: 11px; border: 1px solid #d4d8ce; border-radius: 10px; background: #fbfaf4; box-shadow: 0 15px 30px rgba(33, 51, 38, .17), 0 2px 5px rgba(33, 51, 38, .08); }
 .file-menu-heading { padding: 2px 3px 3px; color: #8a958d; font-size: 9px; font-weight: 700; letter-spacing: .13em; }
 .file-menu .button { width: 100%; min-height: 34px; }
+.account-menu-section { display: grid; gap: 7px; padding-bottom: 7px; border-bottom: 1px solid #e0e1d8; }
+.account-menu-slot .profile-button { width: 100%; max-width: none; justify-content: flex-start; }
 
 .workspace { flex: 1; min-height: 0; display: grid; grid-template-columns: 272px minmax(450px, 1fr) 286px; }
 .tools-panel, .reference-panel { background: var(--paper); }
@@ -151,6 +154,13 @@ dialog::backdrop { background: rgba(15, 28, 19, .78); backdrop-filter: blur(5px)
 .profile-message { min-height: 17px; margin: 7px 0 19px; color: #858e87; font-size: 9px; }
 .profile-actions { display: flex; justify-content: flex-end; gap: 7px; }
 .auth-debug-dialog { width: min(92vw, 520px); padding: 0; color: #25372b; }
+.auth-dialog { width: min(92vw, 380px); padding: 0; color: #25372b; }
+.auth-dialog form { padding: 25px; }
+.auth-dialog-heading { margin-bottom: 22px; }
+.auth-dialog-heading h2 { margin: 5px 0 0; color: #25372b; font-size: 21px; }
+.auth-dialog-heading p { margin: 9px 0 0; color: #7d877f; font-size: 11px; line-height: 1.5; }
+.auth-dialog-slot { display: flex; justify-content: center; min-height: 44px; }
+.auth-dialog .auth-slot { flex: 0 0 200px; }
 .auth-debug-dialog form { padding: 24px; }
 .auth-debug-dialog h2 { margin: 0 0 8px; color: #8b4d40; font-size: 18px; }
 .auth-debug-dialog p { margin: 0 0 13px; color: #68736b; font-size: 11px; line-height: 1.5; }

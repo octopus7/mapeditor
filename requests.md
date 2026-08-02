@@ -330,3 +330,12 @@
 - Added client parsing and an image-specific developer diagnostic dialog, plus API and web tests for diagnostic visibility and secret redaction.
 - Passed `npm run check`, deployed the Worker and Pages successfully, and verified the production health response and latest Pages JavaScript bundle.
 - The first deployment attempt stopped at remote D1 authentication in the restricted environment; the authorized Wrangler retry completed the remote checks and deployment.
+
+## Require elevated permission for Cloudflare and Git operations 2026-08-02 21:24:57 ~ 2026-08-02 21:25:20 (0분 23초)
+
+- Updated `AGENTS.md` to require elevated permission before attempting Cloudflare deployment or GitHub commit and push operations, because these operations consistently fail in the sandbox.
+## Move Google login into menu flow 2026-08-02 21:21:51 ~ 2026-08-02 21:26:48 (4분 57초)
+
+- Replaced the always-visible Google widget with a text `로그인` trigger and a separate authentication dialog.
+- Moved the successful user profile control into the opened file menu; guest users only see the text login button.
+- Preserved existing user changes, passed web checks (39), API tests (17), deployed Worker and Pages, and verified the live bundle and Worker health.

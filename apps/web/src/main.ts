@@ -275,6 +275,46 @@ document.querySelector<HTMLDivElement>("#app")!.innerHTML = `
   </dialog>
 `;
 
+function setupAuthUi(): void {
+  const topActions = document.querySelector<HTMLElement>(".top-actions");
+  const authSlot = document.querySelector<HTMLDivElement>("#auth-slot");
+  const fileMenu = document.querySelector<HTMLElement>("#file-menu");
+  if (!topActions || !authSlot || !fileMenu) return;
+
+  const loginTrigger = document.createElement("button");
+  loginTrigger.type = "button";
+  loginTrigger.className = "button ghost login-trigger";
+  loginTrigger.id = "login-trigger";
+  loginTrigger.textContent = "로그인";
+  loginTrigger.setAttribute("aria-haspopup", "dialog");
+  topActions.prepend(loginTrigger);
+
+  const accountSection = document.createElement("div");
+  accountSection.className = "account-menu-section hidden";
+  accountSection.innerHTML = `
+    <span class="file-menu-heading">계정</span>
+    <div id="account-menu-slot" class="account-menu-slot"></div>`;
+  fileMenu.prepend(accountSection);
+
+  const authDialog = document.createElement("dialog");
+  authDialog.id = "auth-dialog";
+  authDialog.className = "auth-dialog";
+  authDialog.setAttribute("aria-labelledby", "auth-dialog-title");
+  authDialog.innerHTML = `
+    <form method="dialog">
+      <div class="auth-dialog-heading">
+        <span class="eyebrow">ACCOUNT</span>
+        <h2 id="auth-dialog-title">로그인</h2>
+        <p>Google 계정으로 로그인하면 나만의 지도와 이미지를 저장할 수 있습니다.</p>
+      </div>
+      <div class="auth-dialog-slot"></div>
+      <div class="dialog-actions"><button class="button ghost" value="cancel">닫기</button></div>
+    </form>`;
+  authDialog.querySelector<HTMLDivElement>(".auth-dialog-slot")!.append(authSlot);
+  document.body.append(authDialog);
+}
+setupAuthUi();
+
 const canvas = document.querySelector<HTMLCanvasElement>("#map-canvas")!;
 const canvasFrame = document.querySelector<HTMLDivElement>("#canvas-frame")!;
 const context = canvas.getContext("2d")!;
@@ -798,10 +838,14 @@ function restoreAuthSession(): AuthSession | null {
 }
 
 function renderProfile(): void {
-  const slot = document.querySelector<HTMLDivElement>("#auth-slot")!;
+  const slot = document.querySelector<HTMLDivElement>("#account-menu-slot")!;
+  const accountSection = document.querySelector<HTMLElement>("#account-menu-section");
+  const loginTrigger = document.querySelector<HTMLButtonElement>("#login-trigger");
   slot.classList.remove("auth-ready");
   slot.classList.remove("auth-logged-out");
   slot.classList.add("auth-visible");
+  accountSection?.classList.remove("hidden");
+  loginTrigger?.classList.add("hidden");
   if (!authSession) return;
   const button = document.createElement("button");
   const avatar = document.createElement("span");
@@ -818,6 +862,12 @@ function renderProfile(): void {
   button.append(name);
   button.addEventListener("click", openProfileDialog);
   slot.replaceChildren(button);
+}
+
+function renderLoggedOut(): void {
+  document.querySelector<HTMLElement>("#account-menu-section")?.classList.add("hidden");
+  document.querySelector<HTMLDivElement>("#account-menu-slot")?.replaceChildren();
+  document.querySelector<HTMLButtonElement>("#login-trigger")?.classList.remove("hidden");
 }
 
 function avatarGlyph(icon: AvatarIcon, displayName: string): string {
@@ -895,6 +945,13 @@ function renderAuthRetry(label: string, retry: () => void, error?: unknown): voi
   showAuthDebugDialog(error);
 }
 
+function openAuthDialog(): void {
+  const dialog = document.querySelector<HTMLDialogElement>("#auth-dialog");
+  if (!dialog) return;
+  if (!dialog.open) dialog.showModal();
+  void renderGoogleSignIn();
+}
+
 async function loadGoogleIdentity(): Promise<void> {
   if (window.google) return;
   if (googleIdentityLoadPromise) return googleIdentityLoadPromise;
@@ -927,6 +984,7 @@ async function handleGoogleCredential(response: GoogleCredentialResponse): Promi
   try {
     saveAuthSession(await authClient.login(response.credential));
     renderProfile();
+    document.querySelector<HTMLDialogElement>("#auth-dialog")?.close();
   } catch (error) {
     console.error("Google login failed", error);
     renderAuthRetry("로그인 실패 · 다시 시도", () => { void renderGoogleSignIn(); }, error);
@@ -945,7 +1003,6 @@ async function renderGoogleSignIn(): Promise<void> {
   try {
     await loadGoogleIdentity();
     if (!window.google) throw new Error("Google Identity API가 준비되지 않았습니다.");
-    slot.classList.add("auth-logged-out");
     slot.replaceChildren();
     window.google.accounts.id.initialize({
       client_id: googleClientId,
@@ -964,6 +1021,7 @@ async function renderGoogleSignIn(): Promise<void> {
 }
 
 async function initializeAuth(): Promise<void> {
+  renderLoggedOut();
   renderAuthNote("로그인 준비 중");
   try {
     const configResponse = await fetch("/app-config.json", { cache: "no-store" });
@@ -989,7 +1047,7 @@ async function initializeAuth(): Promise<void> {
         saveAuthSession(null);
       }
     }
-    await renderGoogleSignIn();
+    renderLoggedOut();
   } catch (error) {
     console.error("Authentication setup failed", error);
     renderAuthRetry("로그인 서버 다시 연결", () => { void initializeAuth(); });
@@ -1158,6 +1216,10 @@ document.querySelector("#file-menu-toggle")!.addEventListener("click", (event) =
   event.stopPropagation();
   setFileMenuOpen(!fileMenuOpen);
 });
+document.querySelector("#login-trigger")!.addEventListener("click", () => {
+  setFileMenuOpen(false);
+  openAuthDialog();
+});
 document.querySelector("#toggle-fullscreen")!.addEventListener("click", () => { void toggleFullscreen(); });
 document.addEventListener("fullscreenchange", updateFullscreenButton);
 document.addEventListener("webkitfullscreenchange", updateFullscreenButton);
@@ -1237,7 +1299,7 @@ document.querySelector("#logout")!.addEventListener("click", async () => {
       if (dialog?.open) dialog.close();
     }
     button.disabled = false;
-    void renderGoogleSignIn();
+    renderLoggedOut();
   }
 });
 window.addEventListener("keydown", (event) => {
