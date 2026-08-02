@@ -1,5 +1,6 @@
 node_modules/
 .wrangler/
+apps/web/dist/
 
 # 실제 시크릿 파일
 .dev.vars

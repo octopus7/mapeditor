@@ -44,7 +44,7 @@ database/
 └─ migrations/            향후 D1 마이그레이션
 scripts/
 ├─ Initialize-Secrets.ps1
-├─ Deploy-Pages.ps1       향후 추가
+├─ Deploy-Pages.ps1       정적 검사 후 Pages 운영 배포
 ├─ Deploy-Worker.ps1      향후 추가
 └─ Apply-Migrations.ps1   향후 추가
 ```
@@ -76,7 +76,7 @@ npx wrangler pages project create
 정적 빌드 결과 배포 예시:
 
 ```powershell
-npx wrangler pages deploy .\apps\web\dist --project-name <PAGES_PROJECT_NAME>
+npx wrangler pages deploy .\apps\web\dist --project-name <PAGES_PROJECT_NAME> --branch main
 ```
 
 미리보기 배포가 필요하면 운영 배포와 구분되는 branch 이름을 명시한다.
