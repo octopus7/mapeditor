@@ -410,8 +410,7 @@ function setupAuthUi(): void {
   loginTrigger.type = "button";
   loginTrigger.className = "button ghost login-trigger";
   loginTrigger.id = "login-trigger";
-  loginTrigger.textContent = "로그인";
-  loginTrigger.setAttribute("aria-haspopup", "dialog");
+  loginTrigger.textContent = "Google 로그인";
 
   const accountSection = document.createElement("div");
   accountSection.className = "account-menu-section hidden";
@@ -438,7 +437,7 @@ function setupAuthUi(): void {
     <form method="dialog">
       <div class="auth-dialog-heading">
         <span class="eyebrow">ACCOUNT</span>
-        <h2 id="auth-dialog-title">로그인</h2>
+        <h2 id="auth-dialog-title">Google 로그인</h2>
         <p>Google 계정으로 로그인하면 나만의 지도와 이미지를 저장할 수 있습니다.</p>
       </div>
       <div class="auth-dialog-slot"></div>
@@ -894,6 +893,124 @@ const MIN_ZOOM = .125;
 const MAX_ZOOM = 2.5;
 const ZOOM_STEP = .25;
 const WHEEL_ZOOM_FACTOR = 1.1;
+type TouchPoint = { x: number; y: number };
+const touchPointers = new Map<number, TouchPoint>();
+let touchGestureLocked = false;
+let isPinching = false;
+let pinchStartDistance = 0;
+let pinchStartMidpoint: TouchPoint = { x: 0, y: 0 };
+let pinchStartZoom = 1;
+let pinchStartPanX = 0;
+let pinchStartPanY = 0;
+let touchStartMap: MapDocument | null = null;
+let touchStartHistoryLength = 0;
+let touchStartFuture: MapDocument[] = [];
+let touchStartPanX = 0;
+let touchStartPanY = 0;
+let touchStartSelectedImageId: string | null = null;
+let touchStartSelectedImagePlacementIndex: number | null = null;
+let touchStartSelectedImageRotation = DEFAULT_IMAGE_ROTATION;
+let touchStartSelectedImageScale = DEFAULT_IMAGE_SCALE;
+
+function getTouchPair(): [TouchPoint, TouchPoint] | null {
+  const points = [...touchPointers.values()];
+  return points.length >= 2 ? [points[0], points[1]] : null;
+}
+function getTouchDistance(first: TouchPoint, second: TouchPoint): number {
+  return Math.hypot(second.x - first.x, second.y - first.y);
+}
+function getTouchMidpoint(first: TouchPoint, second: TouchPoint): TouchPoint {
+  return { x: (first.x + second.x) / 2, y: (first.y + second.y) / 2 };
+}
+function captureTouchStartState(): void {
+  touchStartMap = cloneMap(map);
+  touchStartHistoryLength = history.length;
+  touchStartFuture = future.slice();
+  touchStartPanX = panX;
+  touchStartPanY = panY;
+  touchStartSelectedImageId = selectedImageId;
+  touchStartSelectedImagePlacementIndex = selectedImagePlacementIndex;
+  touchStartSelectedImageRotation = selectedImageRotation;
+  touchStartSelectedImageScale = selectedImageScale;
+}
+function cancelTouchEditing(): void {
+  if (!touchStartMap) return;
+  map = cloneMap(touchStartMap);
+  history.length = touchStartHistoryLength;
+  future = touchStartFuture.slice();
+  panX = touchStartPanX;
+  panY = touchStartPanY;
+  selectedImageId = touchStartSelectedImageId;
+  selectedImagePlacementIndex = touchStartSelectedImagePlacementIndex;
+  selectedImageRotation = touchStartSelectedImageRotation;
+  selectedImageScale = touchStartSelectedImageScale;
+  movingProp = null;
+  movingImage = null;
+  imageTransformChanged = false;
+  isDrawing = false;
+  strokeChanged = false;
+  lastPaintedCell = "";
+  syncImageTransformControls();
+  renderImageMaterials();
+  render();
+}
+function beginPinch(): void {
+  const pair = getTouchPair();
+  if (!pair) return;
+  cancelTouchEditing();
+  const [first, second] = pair;
+  isPinching = true;
+  touchGestureLocked = true;
+  pinchStartDistance = Math.max(getTouchDistance(first, second), 1);
+  pinchStartMidpoint = getTouchMidpoint(first, second);
+  pinchStartZoom = zoom;
+  pinchStartPanX = panX;
+  pinchStartPanY = panY;
+  canvas.setPointerCapture?.([...touchPointers.keys()][1]);
+}
+function updatePinch(): void {
+  if (!isPinching) return;
+  const pair = getTouchPair();
+  if (!pair) return;
+  const [first, second] = pair;
+  const midpoint = getTouchMidpoint(first, second);
+  const nextZoom = Math.max(MIN_ZOOM, Math.min(MAX_ZOOM, pinchStartZoom * getTouchDistance(first, second) / pinchStartDistance));
+  const viewport = canvasScroll.getBoundingClientRect();
+  const viewportCenterX = viewport.left + viewport.width / 2;
+  const viewportCenterY = viewport.top + viewport.height / 2;
+  const startFocusX = pinchStartMidpoint.x - viewportCenterX;
+  const startFocusY = pinchStartMidpoint.y - viewportCenterY;
+  const currentFocusX = midpoint.x - viewportCenterX;
+  const currentFocusY = midpoint.y - viewportCenterY;
+  const ratio = nextZoom / pinchStartZoom;
+  zoom = nextZoom;
+  panX = currentFocusX - (startFocusX - pinchStartPanX) * ratio;
+  panY = currentFocusY - (startFocusY - pinchStartPanY) * ratio;
+  updateViewport();
+}
+function trackTouchStart(event: PointerEvent): boolean {
+  if (event.pointerType !== "touch") return false;
+  if (touchPointers.size === 0) captureTouchStartState();
+  touchPointers.set(event.pointerId, { x: event.clientX, y: event.clientY });
+  if (touchPointers.size >= 2 && !isPinching) beginPinch();
+  return isPinching || touchGestureLocked;
+}
+function trackTouchMove(event: PointerEvent): boolean {
+  if (event.pointerType !== "touch" || !touchPointers.has(event.pointerId)) return false;
+  touchPointers.set(event.pointerId, { x: event.clientX, y: event.clientY });
+  return isPinching || touchGestureLocked;
+}
+function trackTouchEnd(event: PointerEvent): boolean {
+  if (event.pointerType !== "touch" || !touchPointers.has(event.pointerId)) return false;
+  touchPointers.delete(event.pointerId);
+  const handled = isPinching || touchGestureLocked;
+  if (touchPointers.size < 2) isPinching = false;
+  if (touchPointers.size === 0) {
+    touchGestureLocked = false;
+    touchStartMap = null;
+  }
+  return handled;
+}
 function updateViewport(): void {
   canvasFrame.style.setProperty("--map-zoom", String(zoom));
   canvasFrame.style.setProperty("--pan-x", `${panX}px`);
@@ -2107,6 +2224,83 @@ function openAuthDialog(): void {
   void renderGoogleSignIn();
 }
 
+function randomAuthValue(): string {
+  const bytes = new Uint8Array(32);
+  crypto.getRandomValues(bytes);
+  let binary = "";
+  for (const byte of bytes) binary += String.fromCharCode(byte);
+  return btoa(binary).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/u, "");
+}
+
+function googleRedirectUri(): string {
+  return new URL(window.location.pathname, window.location.origin).href;
+}
+
+function clearGoogleRedirectState(): void {
+  sessionStorage.removeItem("mapeditor-google-state");
+  sessionStorage.removeItem("mapeditor-google-nonce");
+  window.history.replaceState({}, document.title, `${window.location.pathname}${window.location.search}`);
+}
+
+async function startGoogleLoginRedirect(button: HTMLButtonElement): Promise<void> {
+  if (!googleClientId) return;
+  button.disabled = true;
+  const state = randomAuthValue();
+  const nonce = randomAuthValue();
+  sessionStorage.setItem("mapeditor-google-state", state);
+  sessionStorage.setItem("mapeditor-google-nonce", nonce);
+  const params = new URLSearchParams({
+    client_id: googleClientId,
+    redirect_uri: googleRedirectUri(),
+    response_type: "id_token",
+    response_mode: "fragment",
+    scope: "openid email profile",
+    state,
+    nonce,
+    prompt: "select_account",
+  });
+  window.location.assign(`https://accounts.google.com/o/oauth2/v2/auth?${params.toString()}`);
+}
+
+async function handleGoogleLoginRedirect(): Promise<boolean> {
+  const params = new URLSearchParams(window.location.hash.replace(/^#/u, ""));
+  const credential = params.get("id_token");
+  const error = params.get("error");
+  if (!credential && !error) return false;
+
+  const expectedState = sessionStorage.getItem("mapeditor-google-state");
+  const expectedNonce = sessionStorage.getItem("mapeditor-google-nonce");
+  clearGoogleRedirectState();
+  if (error) {
+    const dialog = document.querySelector<HTMLDialogElement>("#auth-dialog");
+    if (dialog && !dialog.open) dialog.showModal();
+    renderAuthRetry("Google 로그인 다시 시도", () => { void renderGoogleSignIn(); });
+    return true;
+  }
+  if (!credential || !expectedState || params.get("state") !== expectedState || !expectedNonce) {
+    const dialog = document.querySelector<HTMLDialogElement>("#auth-dialog");
+    if (dialog && !dialog.open) dialog.showModal();
+    renderAuthRetry("Google 로그인 다시 시도", () => { void renderGoogleSignIn(); });
+    return true;
+  }
+  if (!authClient) return true;
+  renderAuthNote("로그인 확인 중…");
+  try {
+    saveAuthSession(await authClient.login(credential, expectedNonce));
+    renderProfile();
+    void refreshAdminAccess();
+    imageMaterialTab = "mine";
+    renderImageMaterials();
+    void refreshImageMaterials();
+  } catch (loginError) {
+    console.error("Google redirect login failed", loginError);
+    const dialog = document.querySelector<HTMLDialogElement>("#auth-dialog");
+    if (dialog && !dialog.open) dialog.showModal();
+    renderAuthRetry("Google 로그인 다시 시도", () => { void renderGoogleSignIn(); }, loginError);
+  }
+  return true;
+}
+
 async function loadGoogleIdentity(): Promise<void> {
   if (window.google) return;
   if (googleIdentityLoadPromise) return googleIdentityLoadPromise;
@@ -2152,6 +2346,20 @@ async function handleGoogleCredential(response: GoogleCredentialResponse): Promi
 
 async function renderGoogleSignIn(): Promise<void> {
   const slot = document.querySelector<HTMLDivElement>("#auth-slot")!;
+  slot.replaceChildren();
+  slot.classList.remove("auth-ready", "auth-logged-out");
+  slot.classList.add("auth-visible");
+  if (!googleClientId) {
+    renderAuthNote("로그인 설정 필요", "app-config.json에 Google OAuth 클라이언트 ID를 설정해야 합니다.");
+    return;
+  }
+  const button = document.createElement("button");
+  button.type = "button";
+  button.className = "google-login-button";
+  button.textContent = "Google 로그인";
+  button.addEventListener("click", () => { void startGoogleLoginRedirect(button); });
+  slot.replaceChildren(button);
+  return;
   slot.classList.remove("auth-visible");
   if (!googleClientId) {
     renderAuthNote("로그인 설정 필요", "app-config.json에 Google OAuth 클라이언트 ID를 설정해야 합니다.");
@@ -2163,12 +2371,12 @@ async function renderGoogleSignIn(): Promise<void> {
     await loadGoogleIdentity();
     if (!window.google) throw new Error("Google Identity API가 준비되지 않았습니다.");
     slot.replaceChildren();
-    window.google.accounts.id.initialize({
+    window.google!.accounts.id.initialize({
       client_id: googleClientId,
       callback: (response) => { void handleGoogleCredential(response); },
       ux_mode: "popup",
     });
-    window.google.accounts.id.renderButton(slot, {
+    window.google!.accounts.id.renderButton(slot, {
       theme: "outline", size: "medium", shape: "rectangular", text: "signin_with", locale: "ko", width: 200,
     });
     slot.classList.add("auth-ready");
@@ -2196,6 +2404,7 @@ async function initializeAuth(): Promise<void> {
     mapStorageClient = new MapStorageClient(config.apiBaseUrl);
     googleClientId = config.googleClientId;
     void initializeDeveloperAccess(config.apiBaseUrl);
+    if (await handleGoogleLoginRedirect()) return;
     const restored = restoreAuthSession();
     if (restored) {
       try {
@@ -2256,7 +2465,7 @@ async function initializeDeveloperAccess(apiBaseUrl: string): Promise<void> {
       return;
     }
     developerAccess = body.developerDebug;
-    target.textContent = body.developerDebug ? "Developer: yes" : "Developer: no";
+    target.textContent = body.developerDebug ? "Developer: Enabled" : "Developer: Disabled";
     target.classList.add(body.developerDebug ? "is-on" : "is-off");
     target.disabled = !body.developerDebug;
     if (body.developerDebug) target.classList.add("is-link");
@@ -2354,7 +2563,35 @@ function applySelectedImageTransform(rotation: number, scale: number): void {
   syncImageTransformControls();
 }
 
+canvasScroll.addEventListener("pointerdown", (event) => {
+  if (!trackTouchStart(event)) return;
+  event.preventDefault();
+  event.stopPropagation();
+}, true);
+canvasScroll.addEventListener("pointermove", (event) => {
+  if (!trackTouchMove(event)) return;
+  event.preventDefault();
+  if (isPinching) updatePinch();
+  event.stopPropagation();
+}, true);
+canvasScroll.addEventListener("pointerup", (event) => {
+  if (!trackTouchEnd(event)) return;
+  event.preventDefault();
+  event.stopPropagation();
+  if (canvas.hasPointerCapture(event.pointerId)) canvas.releasePointerCapture(event.pointerId);
+}, true);
+canvasScroll.addEventListener("pointercancel", (event) => {
+  if (!trackTouchEnd(event)) return;
+  event.preventDefault();
+  event.stopPropagation();
+  if (canvas.hasPointerCapture(event.pointerId)) canvas.releasePointerCapture(event.pointerId);
+}, true);
+
 canvas.addEventListener("pointerdown", (event) => {
+  if (event.pointerType === "touch" && (isPinching || touchGestureLocked)) {
+    event.preventDefault();
+    return;
+  }
   if (event.button === 1 || (event.button === 0 && (panMode || spacePressed))) {
     event.preventDefault();
     isDrawing = false;
@@ -2394,14 +2631,17 @@ canvas.addEventListener("pointerdown", (event) => {
   event.preventDefault(); isDrawing = true; canvas.setPointerCapture(event.pointerId); paintAt(event);
 });
 canvas.addEventListener("pointermove", (event) => {
+  if (event.pointerType === "touch" && (isPinching || touchGestureLocked)) return;
   if (isPanning) panAt(event);
   else paintAt(event);
 });
 canvas.addEventListener("pointerup", (event) => {
+  if (event.pointerType === "touch" && (isPinching || touchGestureLocked)) return;
   finishStroke();
   if (canvas.hasPointerCapture(event.pointerId)) canvas.releasePointerCapture(event.pointerId);
 });
 canvas.addEventListener("pointercancel", (event) => {
+  if (event.pointerType === "touch" && (isPinching || touchGestureLocked)) return;
   movingProp = null;
   movingImage = null;
   finishStroke();
@@ -2541,7 +2781,7 @@ document.querySelector("#file-menu-toggle")!.addEventListener("click", (event) =
 });
 document.querySelector("#login-trigger")!.addEventListener("click", () => {
   setFileMenuOpen(false);
-  openAuthDialog();
+  window.location.assign("/login/");
 });
 document.querySelector("#toggle-fullscreen")!.addEventListener("click", () => { void toggleFullscreen(); });
 document.addEventListener("fullscreenchange", updateFullscreenButton);
@@ -2620,7 +2860,6 @@ document.querySelector("#logout")!.addEventListener("click", async () => {
     selectedImagePlacementIndex = null;
     renderImageMaterials();
     render();
-    window.google?.accounts.id.disableAutoSelect();
     document.querySelector<HTMLDialogElement>("#profile-dialog")!.close();
     for (const id of ["#map-save-dialog", "#map-library-dialog"]) {
       const dialog = document.querySelector<HTMLDialogElement>(id);

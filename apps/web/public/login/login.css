@@ -1,0 +1,23 @@
+:root {
+  color: #25372b;
+  background: #f7f6ee;
+  font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+}
+
+* { box-sizing: border-box; }
+body { min-width: 320px; min-height: 100vh; margin: 0; background: radial-gradient(circle at 50% 0%, #fffef9, #f2f1e9 70%); }
+.login-page { display: grid; min-height: 100vh; place-items: center; padding: 22px; }
+.login-card { width: min(100%, 420px); padding: 36px 30px 28px; border: 1px solid #d9ddd4; border-radius: 18px; background: rgba(255, 254, 249, .9); box-shadow: 0 24px 70px rgba(25, 42, 30, .12); text-align: center; }
+.brand-mark { display: grid; width: 48px; height: 48px; margin: 0 auto 20px; place-items: center; border-radius: 14px; color: #fffdf5; background: #315f43; font-size: 22px; }
+.eyebrow { margin: 0 0 9px; color: #6d7e71; font-size: 10px; font-weight: 800; letter-spacing: .18em; }
+h1 { margin: 0; color: #25372b; font-size: 25px; }
+.description { margin: 12px auto 22px; color: #738078; font-size: 13px; line-height: 1.65; }
+.status { min-height: 20px; margin-bottom: 12px; color: #7c887f; font-size: 12px; }
+.status.error { color: #a24f43; }
+.google-login { width: 100%; min-height: 52px; border: 1px solid #9eaa9f; border-radius: 11px; color: #25372b; background: #fbfaf5; font: 700 15px/1 inherit; cursor: pointer; transition: border-color .15s ease, background .15s ease, transform .15s ease; }
+.google-login:hover { border-color: #315f43; background: #f0f3eb; }
+.google-login:active { transform: translateY(1px); }
+.google-login:focus-visible { outline: 3px solid rgba(49, 95, 67, .25); outline-offset: 3px; }
+.google-login:disabled { cursor: wait; opacity: .6; }
+.back-link { display: inline-block; margin-top: 20px; color: #6f7d73; font-size: 12px; text-decoration: none; }
+.back-link:hover { color: #315f43; text-decoration: underline; }

@@ -93,13 +93,14 @@ export interface MapRepository {
 
 interface Dependencies {
   createUserRepository(database: D1Database): UserRepository;
-  verifyGoogleCredential(credential: string, clientId: string): Promise<GoogleIdentity>;
+  verifyGoogleCredential(credential: string, clientId: string, expectedNonce?: string): Promise<GoogleIdentity>;
   createImageRepository?(database: D1Database): ImageAssetRepository;
   createMapRepository?(database: D1Database): MapRepository;
 }
 
 interface GoogleCredentialBody {
   credential?: unknown;
+  nonce?: unknown;
 }
 
 interface ProfileUpdateBody {
@@ -902,6 +903,7 @@ async function readSessionUserId(request: Request, secret: string): Promise<stri
 export async function verifyGoogleCredential(
   credential: string,
   clientId: string,
+  expectedNonce?: string,
 ): Promise<GoogleIdentity> {
   try {
     const { payload } = await jwtVerify(credential, GOOGLE_JWKS, {
@@ -915,6 +917,9 @@ export async function verifyGoogleCredential(
       payload.email_verified !== true
     ) {
       throw new ApiError(401, "INVALID_GOOGLE_ACCOUNT", "확인된 Google 계정 정보가 필요합니다.");
+    }
+    if (expectedNonce !== undefined && payload.nonce !== expectedNonce) {
+      throw new ApiError(401, "INVALID_GOOGLE_NONCE", "Google login request could not be verified.");
     }
     return {
       subject: payload.sub,
@@ -1089,9 +1094,15 @@ async function route(
     ) {
       throw new ApiError(400, "INVALID_CREDENTIAL", "Google 로그인 정보가 없습니다.");
     }
+    if (body.nonce !== undefined && (
+      typeof body.nonce !== "string" || body.nonce.length < 16 || body.nonce.length > 256
+    )) {
+      throw new ApiError(400, "INVALID_NONCE", "The Google login nonce is invalid.");
+    }
     const identity = await dependencies.verifyGoogleCredential(
       body.credential,
       env.GOOGLE_CLIENT_ID,
+      body.nonce as string | undefined,
     );
     const profile = await users.saveGoogleLogin(identity);
     const token = await createSessionToken(profile.id, env.SESSION_SECRET);

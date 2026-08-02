@@ -277,6 +277,21 @@ describe("authentication API", () => {
     });
   });
 
+  it("rejects a malformed Google redirect nonce", async () => {
+    const { env, handler } = createTestApi();
+    const response = await handler.fetch!(
+      new Request("https://api.example.com/auth/google", {
+        method: "POST",
+        headers: { "Content-Type": "application/json", Origin: ALLOWED_ORIGIN },
+        body: JSON.stringify({ credential: "test-google-credential", nonce: "short" }),
+      }),
+      env as Env,
+      {} as ExecutionContext,
+    );
+    expect(response.status).toBe(400);
+    expect((await response.json() as { error: { code: string } }).error.code).toBe("INVALID_NONCE");
+  });
+
   it("preserves a user-chosen display name on a later Google login", async () => {
     const { env, handler } = createTestApi();
     const firstSession = await login(handler, env);

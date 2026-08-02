@@ -51,6 +51,20 @@ describe("AuthClient", () => {
     }));
   });
 
+  it("forwards the redirect nonce with a Google credential", async () => {
+    const fetchMock = vi.fn().mockResolvedValue(new Response(JSON.stringify({
+      token: "session-token",
+      profile: { id: "user-1", email: "user@example.com", displayName: "User", avatarIcon: "initial" },
+    }), { status: 200, headers: { "Content-Type": "application/json" } }));
+    vi.stubGlobal("fetch", fetchMock);
+
+    await new AuthClient("https://api.example.com").login("google-id-token", "nonce-value");
+
+    expect(fetchMock).toHaveBeenCalledWith("https://api.example.com/auth/google", expect.objectContaining({
+      body: JSON.stringify({ credential: "google-id-token", nonce: "nonce-value" }),
+    }));
+  });
+
   it("updates only the signed-in user's display name", async () => {
     const fetchMock = vi.fn().mockResolvedValue(new Response(JSON.stringify({
       profile: { id: "user-1", email: "user@example.com", displayName: "새 이름", avatarIcon: "hidden" },

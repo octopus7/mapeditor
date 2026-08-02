@@ -21,7 +21,9 @@ flowchart LR
 
 ## Google 로그인 구조
 
-로그인은 Google Identity Services의 팝업 방식으로 처리한다.
+로그인 화면은 Pages의 `/login/` 정적 페이지에서 시작한다. 편집기의 자체 버튼은 Google Identity Services 위젯을 렌더링하지 않고 Google OpenID Connect 화면으로 직접 이동시킨다. Google은 `/login/`으로 ID 토큰을 반환하며, 페이지는 state와 nonce를 확인한 뒤 기존 `POST /auth/google` API로 전달한다.
+
+로그인은 Pages의 `/login/` 정적 진입 페이지에서 Google OpenID Connect 리다이렉트 방식으로 처리한다.
 
 1. Pages에서 Google 로그인 버튼을 표시한다. 브라우저에서 사용하는 OAuth Client ID는 공개 식별자이며 시크릿으로 간주하지 않는다.
 2. 사용자가 팝업에서 로그인하면 Google이 Pages의 JavaScript 콜백에 `response.credential` ID 토큰(JWT)을 반환한다.
@@ -30,7 +32,7 @@ flowchart LR
 5. Worker는 Google 계정 식별자를 기준으로 D1 사용자 레코드를 생성하거나 조회하고 서비스 세션을 발급한다. 신규 사용자의 초기 표시 이름은 Google 이름이나 이메일을 사용하지 않고 `새유저`로 저장한다.
 6. 로그인 사용자가 계정 설정에서 표시 이름이나 아이콘을 바꾸면 Worker API가 값을 검증하여 D1에 저장한다. 아이콘은 기본 글자, 숨김, 나뭇잎, 소나무, 물방울, 바위 중에서 고를 수 있다. 이메일은 일반 페이지에 표시하지 않고 사용자가 프로필 버튼을 눌러 연 계정 정보 창에서만 보여 준다.
 
-이 구성은 OAuth authorization code를 받는 리다이렉트 방식이 아니다. 따라서 Google Cloud Console의 `Authorized redirect URIs`는 비워 두고 `login_uri`도 설정하지 않는다. 팝업 완료 후 별도의 되돌아오기 URL로 이동하지 않으며, 현재 Pages 문서의 JavaScript 콜백이 ID 토큰을 받는다.
+Google Cloud Console의 Web application OAuth Client에는 `https://mapedit.pages.dev/login/`을 `Authorized redirect URIs`로 등록하고, 로컬 테스트 시 `http://localhost:4173/login/`과 `http://127.0.0.1:4173/login/`도 등록한다. 로그인 완료 후 `/login/` 페이지가 ID 토큰을 검증하고 API 세션을 만든 뒤 편집기로 돌아온다.
 
 Google Cloud Console의 Web application OAuth Client에는 다음 `Authorized JavaScript origins`를 등록한다. Origin에는 경로와 후행 슬래시를 넣지 않는다.
 
@@ -40,7 +42,7 @@ http://localhost:4173
 http://127.0.0.1:4173
 ```
 
-로컬 origin 두 개는 로컬 로그인을 시험할 때만 필요하다. 이 팝업 로그인만으로는 Google API 접근용 access token 또는 refresh token이 발급되지 않으며 애플리케이션은 Google OAuth Client Secret을 사용하거나 보관하지 않는다. 향후 Google Drive 같은 API 권한이 필요해 authorization code 흐름을 추가할 때에는 Worker 콜백 주소를 확정하고 그 주소를 `Authorized redirect URIs`에 별도로 등록한다.
+로컬 origin 두 개는 로컬 로그인을 시험할 때만 필요하다. 현재 `/login/`은 ID 토큰을 직접 받는 OpenID Connect implicit 응답을 사용하므로 Worker에 Google OAuth Client Secret을 보관하지 않는다. Google API 접근 권한이나 refresh token이 필요해 authorization code 흐름을 추가할 때에는 별도 서버 교환 구조를 확정해야 한다.
 
 ## Cloudflare Pages
 

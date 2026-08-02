@@ -470,3 +470,23 @@
 - Added 20 static transparent landmark materials while keeping legacy built-in image ids resolvable for existing drafts without exposing the old props in the default palette.
 - Integrated image-material tabs, continuous-placement toggle, transform sliders and per-field SVG reset controls, developer/admin user management with saved-map browsing, water bank direction treatment, and centered shrub rendering.
 - Ran the full typecheck, 46 tests, production build, and diff validation successfully. Deployment and repository publication follow after the final production deployment check.
+
+## Improve water boundary rendering calculation 2026-08-03 00:28:22 ~ 2026-08-03 00:29:36 (1분 14초)
+
+- Kept water out of ordinary ground transition layers so each land cell retains its own ground and water is represented only by the directional bank correction pass.
+- Changed the water bank mask to use cardinal water-facing neighbors only, preventing diagonal-only water from creating a side correction piece.
+- Added regression tests for land ground preservation, water overlay exclusion, cardinal bank masks, and diagonal-only water cases.
+- Passed the focused autotile tests, all 48 tests, production build, and diff validation. The project check remains blocked by two pre-existing `window.google` nullable type errors in the in-progress authentication changes; deployment, commit, and push were not performed.
+
+## Add dedicated Google login entry and refine terrain corrections 2026-08-03 00:28:22 ~ 2026-08-03 00:35:26 (7분 4초)
+
+- Added the static `/login/` entry page with an immediate custom `Google 로그인` button. It redirects directly to Google's OpenID Connect screen, validates state and nonce, exchanges the returned ID token through the existing API, and returns to the editor without rendering the Google widget or its transient logo.
+- Added nonce validation to the Worker login endpoint, documented the `/login/` authorized redirect URI, changed the developer status label to `Developer: Enabled`/`Developer: Disabled`, and removed Google widget permissions from the Pages CSP.
+- Kept water as a complete tile property and limited correction layers to cardinal water-facing bank pieces. Grass-to-dirt boundaries no longer receive a transition correction.
+- Passed type checks, 49 tests, production build, and diff validation. Deployed Worker version `34b999c2-c871-4a05-b7a6-cd4382078e9d` and Pages preview `https://75f4d740.mapedit.pages.dev`; verified health, `/login/`, configured API/client settings, and the new developer label.
+
+## Add workspace-only pinch zoom 2026-08-03 00:30:00 ~ 2026-08-03 00:32:23 (2분 23초)
+
+- Added iPad touch pinch zoom handling only within the map workspace, using the two-finger midpoint as the zoom focus and preserving two-finger movement as viewport panning.
+- Prevented the browser page gesture from taking over inside `.canvas-scroll` while leaving areas outside the workspace unchanged; an in-progress one-finger edit is rolled back when a pinch begins.
+- Passed web and API typechecks, all 48 tests, and the production build. Deployment, commit, and push were not performed.

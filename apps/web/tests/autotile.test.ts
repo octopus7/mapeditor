@@ -95,14 +95,24 @@ describe("autotile calculations", () => {
     ]);
 
     expect(getTransitionLayers(map, 1, 1)).toEqual([
-      { ground: "dirt", mask: NEIGHBOR_MASK.W, priority: GROUND_PRIORITY.dirt },
       {
         ground: "stone",
         mask: NEIGHBOR_MASK.N | NEIGHBOR_MASK.E | NEIGHBOR_MASK.NE,
         priority: GROUND_PRIORITY.stone,
       },
-      { ground: "water", mask: NEIGHBOR_MASK.S, priority: GROUND_PRIORITY.water },
     ]);
+  });
+
+  it("keeps water out of ground overlays so land keeps its own ground", () => {
+    const map = createMap([
+      ["dirt", "water", "dirt"],
+      ["dirt", "dirt", "dirt"],
+      ["dirt", "dirt", "dirt"],
+    ]);
+
+    expect(getTransitionLayers(map, 1, 1)).toEqual([]);
+    expect(getWaterBankMask(map, 1, 1)).toBe(NEIGHBOR_MASK.N);
+    expect(map.cells[4].ground).toBe("dirt");
   });
 
   it("does not draw lower-priority ground over the current ground", () => {
@@ -126,6 +136,16 @@ describe("autotile calculations", () => {
       NEIGHBOR_MASK.N | NEIGHBOR_MASK.E | NEIGHBOR_MASK.S | NEIGHBOR_MASK.W,
     );
     expect(getWaterBankMask(map, 1, 0)).toBe(0);
+  });
+
+  it("does not create a water bank from a diagonal-only neighbor", () => {
+    const map = createMap([
+      ["water", "dirt", "dirt"],
+      ["dirt", "dirt", "dirt"],
+      ["dirt", "dirt", "water"],
+    ]);
+
+    expect(getWaterBankMask(map, 1, 1)).toBe(0);
   });
 
   it("classifies bridge connections as horizontal, vertical, corners, and full", () => {

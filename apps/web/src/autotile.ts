@@ -30,6 +30,13 @@ const DIAGONAL_RULES = [
   { bit: NEIGHBOR_MASK.NW, adjacent: NEIGHBOR_MASK.N | NEIGHBOR_MASK.W },
 ] as const;
 
+const CARDINAL_DIRECTIONS = [
+  { column: 0, row: -1, bit: NEIGHBOR_MASK.N },
+  { column: 1, row: 0, bit: NEIGHBOR_MASK.E },
+  { column: 0, row: 1, bit: NEIGHBOR_MASK.S },
+  { column: -1, row: 0, bit: NEIGHBOR_MASK.W },
+] as const;
+
 export const GROUND_PRIORITY: Readonly<Record<GroundType, number>> = {
   grass: 0,
   dirt: 1,
@@ -83,10 +90,7 @@ export function getNeighborMask(
 
   const currentGround = map.cells[cellIndex(map, column, row)].ground;
   const directions = [
-    { column: 0, row: -1, bit: NEIGHBOR_MASK.N },
-    { column: 1, row: 0, bit: NEIGHBOR_MASK.E },
-    { column: 0, row: 1, bit: NEIGHBOR_MASK.S },
-    { column: -1, row: 0, bit: NEIGHBOR_MASK.W },
+    ...CARDINAL_DIRECTIONS,
     { column: 1, row: -1, bit: NEIGHBOR_MASK.NE },
     { column: 1, row: 1, bit: NEIGHBOR_MASK.SE },
     { column: -1, row: 1, bit: NEIGHBOR_MASK.SW },
@@ -104,6 +108,26 @@ export function getNeighborMask(
   }, 0);
 
   return normalizeBlobMask(mask);
+}
+
+function getCardinalNeighborMask(
+  map: MapDocument,
+  column: number,
+  row: number,
+  ground: GroundType,
+): number {
+  if (!isInside(map, column, row)) return 0;
+
+  const currentGround = map.cells[cellIndex(map, column, row)].ground;
+  return CARDINAL_DIRECTIONS.reduce((result, direction) => {
+    const neighborGround = getNeighborGround(
+      map,
+      column + direction.column,
+      row + direction.row,
+      currentGround,
+    );
+    return neighborGround === ground ? result | direction.bit : result;
+  }, 0);
 }
 
 /**
@@ -141,7 +165,13 @@ export function getPropNeighborMask(
   return normalizeBlobMask(mask);
 }
 
-/** Returns the water edge mask for a non-water cell so its raised bank can be rendered. */
+/**
+ * Returns only the cardinal water-facing edges for a non-water cell.
+ *
+ * Water is rendered as a directional correction piece, not as a normal
+ * ground transition. Keeping this mask cardinal also prevents a diagonal
+ * water tile from creating a side/correction piece on its own.
+ */
 export function getWaterBankMask(
   map: MapDocument,
   column: number,
@@ -149,7 +179,7 @@ export function getWaterBankMask(
 ): number {
   if (!isInside(map, column, row)) return 0;
   if (map.cells[cellIndex(map, column, row)].ground === "water") return 0;
-  return getNeighborMask(map, column, row, "water");
+  return getCardinalNeighborMask(map, column, row, "water");
 }
 
 export type BridgeConnectionShape =
@@ -242,7 +272,14 @@ export function getTransitionLayers(
   const currentGround = map.cells[cellIndex(map, column, row)].ground;
   const currentPriority = GROUND_PRIORITY[currentGround];
   const layers = groundTypes
-    .filter((ground) => GROUND_PRIORITY[ground] > currentPriority)
+    // Water has its own directional bank/correction pass. Returning it here
+    // would paint water over the current ground before the thinner bank face,
+    // leaving a visible strip between the side piece and the land tile.
+    .filter((ground) => (
+      ground !== "water" &&
+      !(currentGround === "grass" && ground === "dirt") &&
+      GROUND_PRIORITY[ground] > currentPriority
+    ))
     .map((ground) => ({
       ground,
       mask: getNeighborMask(map, column, row, ground),

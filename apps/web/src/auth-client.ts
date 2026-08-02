@@ -65,10 +65,10 @@ export class AuthApiError extends Error {
 export class AuthClient {
   constructor(private readonly baseUrl: string) {}
 
-  async login(credential: string): Promise<AuthSession> {
+  async login(credential: string, nonce?: string): Promise<AuthSession> {
     return this.request("/auth/google", {
       method: "POST",
-      body: JSON.stringify({ credential }),
+      body: JSON.stringify(nonce ? { credential, nonce } : { credential }),
     });
   }
 

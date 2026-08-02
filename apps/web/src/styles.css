@@ -26,12 +26,17 @@ button:focus-visible, input:focus-visible, canvas:focus-visible { outline: 3px s
 .top-actions { display: flex; align-items: center; gap: 7px; }
 .auth-slot { position: relative; isolation: isolate; contain: layout paint; visibility: hidden; width: 200px; height: 44px; flex: 0 0 200px; display: flex; align-items: center; justify-content: center; overflow: hidden; clip-path: inset(0 round 7px); }
 .auth-slot.auth-visible { visibility: visible; }
+.google-login-button { width: 100%; min-height: 44px; padding: 0 18px; border: 1px solid #9eaa9f; border-radius: 9px; color: #25372b; background: #fbfaf5; font: 700 14px/1 inherit; cursor: pointer; transition: background .15s ease, border-color .15s ease, transform .15s ease; }
+.google-login-button:hover { border-color: #315f43; background: #f0f3eb; }
+.google-login-button:active { transform: translateY(1px); }
+.google-login-button:focus-visible { outline: 3px solid rgba(49, 95, 67, .25); outline-offset: 2px; }
+.google-login-button:disabled { cursor: wait; opacity: .6; }
 .auth-slot > div, .auth-slot > div > div { position: relative; width: 200px !important; height: 44px !important; min-width: 0 !important; max-width: 200px !important; min-height: 0 !important; max-height: 44px !important; overflow: hidden !important; transform: none !important; }
 .auth-slot iframe { position: absolute !important; inset: 0 auto auto 0 !important; display: block; width: 200px !important; height: 44px !important; min-width: 200px !important; max-width: 200px !important; min-height: 44px !important; max-height: 44px !important; transform: none !important; visibility: hidden; }
 .auth-slot.auth-ready iframe { visibility: visible; }
 .auth-note { color: #889189; font-size: 10px; white-space: nowrap; }
 .auth-retry { min-height: 34px; padding: 0 10px; border: 1px dashed #bdc5bc; border-radius: 7px; color: #667269; background: transparent; cursor: pointer; font-size: 10px; }
-.login-trigger { min-width: 58px; }
+.login-trigger { min-width: 104px; }
 .profile-button { min-height: 38px; max-width: 200px; display: flex; align-items: center; gap: 8px; padding: 4px 10px 4px 5px; border: 1px solid #cdd3ca; border-radius: 20px; background: #fff; cursor: pointer; }
 .profile-button span { width: 28px; height: 28px; flex: none; display: grid; place-items: center; border-radius: 50%; color: #fff; background: #41684a; font-size: 12px; font-weight: 700; }
 .profile-button strong { overflow: hidden; color: #3f5145; font-size: 11px; text-overflow: ellipsis; white-space: nowrap; }
@@ -164,7 +169,7 @@ button:focus-visible, input:focus-visible, canvas:focus-visible { outline: 3px s
 .fullscreen-toggle[aria-pressed="true"] { color: #f5f5eb; border-color: #315a3d; background: #315a3d; }
 .fullscreen-icon, .file-menu-toggle svg { width: 17px; height: 17px; display: block; margin: auto; fill: none; stroke: currentColor; stroke-linecap: round; stroke-linejoin: round; stroke-width: 1.8; }
 .file-menu-toggle svg { width: 18px; height: 18px; }
-.canvas-scroll { position: relative; min-height: 0; padding: 28px; overflow: hidden; background-color: #dcddd3; background-image: radial-gradient(#c6c9bd 1px, transparent 1px); background-size: 18px 18px; }
+.canvas-scroll { position: relative; min-height: 0; padding: 28px; overflow: hidden; touch-action: none; background-color: #dcddd3; background-image: radial-gradient(#c6c9bd 1px, transparent 1px); background-size: 18px 18px; }
 .canvas-frame { --map-zoom: 1; --pan-x: 0px; --pan-y: 0px; position: absolute; top: 50%; left: 50%; width: min(100%, 1008px); min-width: 660px; margin: 0; padding: 7px; border: 1px solid #bcc1b6; border-radius: 5px; background: #f7f6ee; box-shadow: 0 20px 45px rgba(46, 61, 49, .2), 0 2px 5px rgba(46, 61, 49, .15); transform: translate(calc(-50% + var(--pan-x)), calc(-50% + var(--pan-y))) scale(var(--map-zoom)); transform-origin: center; }
 #map-canvas { display: block; width: 100%; height: auto; cursor: crosshair; image-rendering: auto; touch-action: none; }
 #map-canvas.pan-mode { cursor: grab; }
