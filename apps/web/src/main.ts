@@ -230,11 +230,11 @@ document.querySelector<HTMLDivElement>("#app")!.innerHTML = `
               </button>`).join("")}
           </div>
           <div class="brightness-correction-control">
-            <div class="section-label"><span>BRIGHTNESS</span><output id="brightness-correction-output">0</output></div>
+            <div class="section-label"><span>BRIGHTNESS</span></div>
             <div class="brightness-correction-list" role="radiogroup" aria-label="명도 보정 단계">
               ${[0, 1, 2, 3].map((level) => `
-                <button class="brightness-correction-option ${level === 0 ? "selected" : ""}" type="button" data-ground-brightness="${level}" role="radio" aria-checked="${level === 0}">
-                  <span class="brightness-correction-swatch level-${level}" aria-hidden="true"></span><strong>${level}</strong>
+                <button class="brightness-correction-option ${level === 0 ? "selected" : ""}" type="button" data-ground-brightness="${level}" role="radio" aria-label="명도 보정 ${level === 0 ? "없음" : `${level}단계 어둡게`}" aria-checked="${level === 0}">
+                  <span class="brightness-correction-swatch level-${level}" aria-hidden="true"></span>
                 </button>`).join("")}
             </div>
           </div>
@@ -540,9 +540,18 @@ groundTextureContext.imageSmoothingEnabled = false;
 const groundTextureImage = groundTextureContext.createImageData(CELL_SIZE, CELL_SIZE);
 const brightnessCorrectionCanvas = document.createElement("canvas");
 const brightnessCorrectionContext = brightnessCorrectionCanvas.getContext("2d")!;
+const brightnessCorrectionPatchCanvas = document.createElement("canvas");
+const brightnessCorrectionPatchContext = brightnessCorrectionPatchCanvas.getContext("2d")!;
+brightnessCorrectionPatchContext.imageSmoothingEnabled = false;
+const brightnessCorrectionDirtyCells = new Set<number>();
+let brightnessCorrectionCacheReady = false;
+let brightnessCorrectionActiveCellCount = 0;
 function syncCanvasSize(): void {
   canvas.width = map.columns * CELL_SIZE;
   canvas.height = map.rows * CELL_SIZE;
+  brightnessCorrectionCanvas.width = canvas.width;
+  brightnessCorrectionCanvas.height = canvas.height;
+  invalidateBrightnessCorrectionCache();
   document.querySelector("#map-size")!.textContent = `${map.columns} × ${map.rows}`;
   canvas.setAttribute("aria-label", `${map.columns} 곱하기 ${map.rows} 타일 지도`);
 }
@@ -931,30 +940,189 @@ function drawGroundCorrections(): void {
 }
 const brightnessCorrectionAlpha: Record<BrightnessCorrection, number> = {
   0: 0,
-  1: .07,
-  2: .13,
-  3: .2,
+  1: .2,
+  2: .32,
+  3: .44,
+};
+const brightnessCorrectionLightnessShift: Record<BrightnessCorrection, number> = {
+  0: 0,
+  1: -.04,
+  2: -.09,
+  3: -.14,
+};
+const brightnessCorrectionSaturationBoost: Record<BrightnessCorrection, number> = {
+  0: 0,
+  1: .06,
+  2: .12,
+  3: .18,
 };
 const BRIGHTNESS_CORRECTION_INSET = CELL_SIZE / 8;
-function drawBrightnessCorrections(): void {
-  brightnessCorrectionCanvas.width = canvas.width;
-  brightnessCorrectionCanvas.height = canvas.height;
-  let hasCorrections = false;
-  for (let row = 0; row < map.rows; row += 1) for (let column = 0; column < map.columns; column += 1) {
-    const level = map.cells[cellIndex(map, column, row)].brightnessCorrection ?? 0;
+const BRIGHTNESS_CORRECTION_BLUR = BRIGHTNESS_CORRECTION_INSET;
+type BrightnessCorrectionRect = { x: number; y: number; width: number; height: number };
+
+function getBrightnessCorrectionColor(ground: GroundType, level: BrightnessCorrection): string {
+  const [red, green, blue] = groundPalettes[ground];
+  const maximum = Math.max(red, green, blue) / 255;
+  const minimum = Math.min(red, green, blue) / 255;
+  const lightness = (maximum + minimum) / 2;
+  const difference = maximum - minimum;
+  let hue = 0;
+  let saturation = 0;
+  if (difference > 0) {
+    saturation = difference / (1 - Math.abs(2 * lightness - 1));
+    if (maximum === red / 255) hue = ((green - blue) / 255 / difference) % 6;
+    else if (maximum === green / 255) hue = (blue - red) / 255 / difference + 2;
+    else hue = (red - green) / 255 / difference + 4;
+    hue = Math.round(hue * 60);
+    if (hue < 0) hue += 360;
+  }
+  const correctedLightness = Math.max(.08, lightness + brightnessCorrectionLightnessShift[level]);
+  const correctedSaturation = Math.min(1, saturation + brightnessCorrectionSaturationBoost[level]);
+  return `hsl(${hue} ${Math.round(correctedSaturation * 100)}% ${Math.round(correctedLightness * 100)}%)`;
+}
+
+function invalidateBrightnessCorrectionCache(): void {
+  brightnessCorrectionCacheReady = false;
+  brightnessCorrectionActiveCellCount = 0;
+  brightnessCorrectionDirtyCells.clear();
+  brightnessCorrectionPatchCanvas.width = 1;
+  brightnessCorrectionPatchCanvas.height = 1;
+}
+
+function markBrightnessCorrectionChanges(
+  previous: MapDocument,
+  next: MapDocument,
+  cells: CellPosition[],
+): void {
+  if (!brightnessCorrectionCacheReady) return;
+  const changedIndexes = new Set<number>();
+  for (const cell of cells) {
+    if (cell.column < 0 || cell.column >= next.columns || cell.row < 0 || cell.row >= next.rows) continue;
+    const index = cellIndex(next, cell.column, cell.row);
+    if (changedIndexes.has(index)) continue;
+    changedIndexes.add(index);
+    const previousCell = previous.cells[index];
+    const nextCell = next.cells[index];
+    const previousLevel = previousCell?.brightnessCorrection ?? 0;
+    const nextLevel = nextCell?.brightnessCorrection ?? 0;
+    if (previousLevel === nextLevel && previousCell?.ground === nextCell?.ground) continue;
+    brightnessCorrectionDirtyCells.add(index);
+    if (previousLevel === 0 && nextLevel > 0) brightnessCorrectionActiveCellCount += 1;
+    if (previousLevel > 0 && nextLevel === 0) brightnessCorrectionActiveCellCount -= 1;
+  }
+}
+
+function getBrightnessCorrectionRect(column: number, row: number): BrightnessCorrectionRect {
+  const x = Math.max(0, Math.floor(column * CELL_SIZE - BRIGHTNESS_CORRECTION_BLUR));
+  const y = Math.max(0, Math.floor(row * CELL_SIZE - BRIGHTNESS_CORRECTION_BLUR));
+  const right = Math.min(canvas.width, Math.ceil((column + 1) * CELL_SIZE + BRIGHTNESS_CORRECTION_BLUR));
+  const bottom = Math.min(canvas.height, Math.ceil((row + 1) * CELL_SIZE + BRIGHTNESS_CORRECTION_BLUR));
+  return { x, y, width: right - x, height: bottom - y };
+}
+
+function rectsOverlap(first: BrightnessCorrectionRect, second: BrightnessCorrectionRect): boolean {
+  return first.x <= second.x + second.width
+    && second.x <= first.x + first.width
+    && first.y <= second.y + second.height
+    && second.y <= first.y + first.height;
+}
+
+function mergeBrightnessCorrectionRects(rects: BrightnessCorrectionRect[]): BrightnessCorrectionRect[] {
+  const merged: BrightnessCorrectionRect[] = [];
+  for (const rect of rects) {
+    let candidate = rect;
+    let mergedAnother = true;
+    while (mergedAnother) {
+      mergedAnother = false;
+      for (let index = 0; index < merged.length; index += 1) {
+        const existing = merged[index];
+        if (!rectsOverlap(existing, candidate)) continue;
+        const right = Math.max(existing.x + existing.width, candidate.x + candidate.width);
+        const bottom = Math.max(existing.y + existing.height, candidate.y + candidate.height);
+        candidate = {
+          x: Math.min(existing.x, candidate.x),
+          y: Math.min(existing.y, candidate.y),
+          width: right - Math.min(existing.x, candidate.x),
+          height: bottom - Math.min(existing.y, candidate.y),
+        };
+        merged.splice(index, 1);
+        mergedAnother = true;
+        break;
+      }
+    }
+    merged.push(candidate);
+  }
+  return merged;
+}
+
+function redrawBrightnessCorrectionRegion(region: BrightnessCorrectionRect): void {
+  const patchX = Math.max(0, Math.floor(region.x - BRIGHTNESS_CORRECTION_BLUR));
+  const patchY = Math.max(0, Math.floor(region.y - BRIGHTNESS_CORRECTION_BLUR));
+  const patchRight = Math.min(canvas.width, Math.ceil(region.x + region.width + BRIGHTNESS_CORRECTION_BLUR));
+  const patchBottom = Math.min(canvas.height, Math.ceil(region.y + region.height + BRIGHTNESS_CORRECTION_BLUR));
+  brightnessCorrectionPatchCanvas.width = Math.max(1, patchRight - patchX);
+  brightnessCorrectionPatchCanvas.height = Math.max(1, patchBottom - patchY);
+  brightnessCorrectionPatchContext.imageSmoothingEnabled = false;
+  brightnessCorrectionPatchContext.clearRect(0, 0, brightnessCorrectionPatchCanvas.width, brightnessCorrectionPatchCanvas.height);
+
+  const firstColumn = Math.max(0, Math.floor(patchX / CELL_SIZE) - 1);
+  const lastColumn = Math.min(map.columns - 1, Math.ceil(patchRight / CELL_SIZE));
+  const firstRow = Math.max(0, Math.floor(patchY / CELL_SIZE) - 1);
+  const lastRow = Math.min(map.rows - 1, Math.ceil(patchBottom / CELL_SIZE));
+  for (let row = firstRow; row <= lastRow; row += 1) for (let column = firstColumn; column <= lastColumn; column += 1) {
+    const cell = map.cells[cellIndex(map, column, row)];
+    const level = cell.brightnessCorrection ?? 0;
     if (level === 0) continue;
-    hasCorrections = true;
-    brightnessCorrectionContext.fillStyle = `rgba(255, 255, 255, ${brightnessCorrectionAlpha[level]})`;
-    brightnessCorrectionContext.fillRect(
-      column * CELL_SIZE + BRIGHTNESS_CORRECTION_INSET,
-      row * CELL_SIZE + BRIGHTNESS_CORRECTION_INSET,
+    brightnessCorrectionPatchContext.fillStyle = getBrightnessCorrectionColor(cell.ground, level);
+    brightnessCorrectionPatchContext.globalAlpha = brightnessCorrectionAlpha[level];
+    brightnessCorrectionPatchContext.fillRect(
+      column * CELL_SIZE + BRIGHTNESS_CORRECTION_INSET - patchX,
+      row * CELL_SIZE + BRIGHTNESS_CORRECTION_INSET - patchY,
       CELL_SIZE - BRIGHTNESS_CORRECTION_INSET * 2,
       CELL_SIZE - BRIGHTNESS_CORRECTION_INSET * 2,
     );
   }
-  if (!hasCorrections) return;
+  brightnessCorrectionPatchContext.globalAlpha = 1;
+
+  brightnessCorrectionContext.save();
+  brightnessCorrectionContext.beginPath();
+  brightnessCorrectionContext.rect(region.x, region.y, region.width, region.height);
+  brightnessCorrectionContext.clip();
+  brightnessCorrectionContext.clearRect(region.x, region.y, region.width, region.height);
+  if (brightnessCorrectionActiveCellCount > 0) {
+    brightnessCorrectionContext.filter = `blur(${BRIGHTNESS_CORRECTION_BLUR}px)`;
+    brightnessCorrectionContext.drawImage(brightnessCorrectionPatchCanvas, patchX, patchY);
+  }
+  brightnessCorrectionContext.restore();
+}
+
+function refreshBrightnessCorrectionCache(): void {
+  if (!brightnessCorrectionCacheReady) {
+    brightnessCorrectionActiveCellCount = 0;
+    for (const cell of map.cells) if ((cell.brightnessCorrection ?? 0) > 0) brightnessCorrectionActiveCellCount += 1;
+    brightnessCorrectionContext.clearRect(0, 0, canvas.width, canvas.height);
+    redrawBrightnessCorrectionRegion({ x: 0, y: 0, width: canvas.width, height: canvas.height });
+    brightnessCorrectionCacheReady = true;
+    brightnessCorrectionDirtyCells.clear();
+    brightnessCorrectionPatchCanvas.width = 1;
+    brightnessCorrectionPatchCanvas.height = 1;
+    return;
+  }
+  if (brightnessCorrectionDirtyCells.size === 0) return;
+  const regions = mergeBrightnessCorrectionRects(
+    [...brightnessCorrectionDirtyCells].map((index) => getBrightnessCorrectionRect(index % map.columns, Math.floor(index / map.columns))),
+  );
+  for (const region of regions) redrawBrightnessCorrectionRegion(region);
+  brightnessCorrectionDirtyCells.clear();
+  brightnessCorrectionPatchCanvas.width = 1;
+  brightnessCorrectionPatchCanvas.height = 1;
+}
+
+function drawBrightnessCorrections(): void {
+  refreshBrightnessCorrectionCache();
+  if (brightnessCorrectionActiveCellCount === 0) return;
   context.save();
-  context.filter = `blur(${BRIGHTNESS_CORRECTION_INSET}px)`;
+  context.filter = "none";
   context.drawImage(brightnessCorrectionCanvas, 0, 0);
   context.restore();
 }
@@ -1583,11 +1751,13 @@ function paintAt(event: PointerEvent): void {
     return;
   }
   const candidate = cloneMap(map);
+  const groundCells = selectedLayer === "ground" ? getBrushCells(column, row) : [];
   const changed = selectedLayer === "ground"
-    ? applyGroundCells(candidate, getBrushCells(column, row), erase)
+    ? applyGroundCells(candidate, groundCells, erase)
     : placeProp(candidate, column, row, erase ? null : selectedProp);
   if (!changed) return;
   if (!strokeChanged) { history.push(cloneMap(map)); if (history.length > 60) history.shift(); future = []; }
+  if (selectedLayer === "ground") markBrightnessCorrectionChanges(map, candidate, groundCells);
   strokeChanged = true; map = candidate; render();
 }
 function finishStroke(): void {
@@ -1603,12 +1773,14 @@ function finishStroke(): void {
     shapeDrag = null;
     if (drag.current) {
       const candidate = cloneMap(map);
-      const changed = applyGroundCells(candidate, getShapeCells(drag.start, drag.current, brushShape as "rectangle" | "ellipse"), drag.erase);
+      const groundCells = getShapeCells(drag.start, drag.current, brushShape as "rectangle" | "ellipse");
+      const changed = applyGroundCells(candidate, groundCells, drag.erase);
       if (changed) {
         history.push(cloneMap(map));
         if (history.length > 60) history.shift();
         future = [];
         strokeChanged = true;
+        markBrightnessCorrectionChanges(map, candidate, groundCells);
         map = candidate;
       }
     }
@@ -3003,8 +3175,6 @@ function setGroundBrightness(value: number): void {
     button.classList.toggle("selected", active);
     button.setAttribute("aria-checked", String(active));
   });
-  const output = document.querySelector<HTMLOutputElement>("#brightness-correction-output");
-  if (output) output.value = String(selectedGroundBrightness);
   render();
 }
 function setTileElevationOption(elevation: TileElevation): void {

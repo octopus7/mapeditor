@@ -19,8 +19,4 @@ npm install
 .\scripts\Deploy-Pages.ps1
 ```
 
-## 이미지 업로드
-
-이미지 업로드 기능은 향후 [external-service-integration.md](https://github.com/octopus7/meme/blob/main/docs/external-service-integration.md)에 정의된 외부 서비스 연동 방식을 사용할 예정이다.
-
 현재 배포 구조와 사람이 직접 준비해야 하는 설정은 각각 [deployment-architecture.md](./deployment-architecture.md)와 [setup-responsibilities.md](./setup-responsibilities.md)를 참고한다.

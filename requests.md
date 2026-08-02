@@ -571,3 +571,23 @@
 - 절벽 남쪽 면의 가로 물결 무늬를 제거하고 세로로 흔들리는 능선과 면 분할 질감을 적용했다.
 - 지면에 닿는 하단 경계를 직선으로 그리지 않고 불규칙한 다각형 프로필로 채워 박스형 실루엣을 줄였으며, 세로 능선이 해당 경계까지 이어지도록 조정했다.
 - 타입검사, 53개 테스트, Vite 프로덕션 빌드와 운영 health/Pages 응답을 통과한 뒤 Worker와 Pages를 배포했다. Worker `a1d36971-b915-479c-8dc8-3eabff883ac5`, Pages `https://08b0a7c4.mapedit.pages.dev`.
+
+## Cache partial brightness corrections and darken with saturation 2026-08-03 01:27:40 ~ 2026-08-03 01:32:58 (5분 18초)
+
+- 명도 보정 레이어를 매 렌더 전체 재생성하지 않고 오프스크린 캐시로 유지하도록 변경했다.
+- 보정값이나 지형이 바뀐 셀과 블러 영향 반경만 패치하며, 맵 교체·크기 변경 시에만 전체 캐시를 재구성한다.
+- 흰색 오버레이 방식 대신 지형별 HSL 색상으로 명도를 낮추고 채도를 높여 어둡지만 탁하지 않게 보정했다.
+- 명도 보정 UI에서 숫자 라벨을 제거하고 색상 스와치만 표시하도록 변경했다.
+- 타입검사, 53개 테스트, Vite 프로덕션 빌드와 `git diff --check`를 통과했다. 배포·커밋·푸시는 수행하지 않았다.
+
+## Remove obsolete image upload plan from README 2026-08-03 01:33:20 ~ 2026-08-03 01:34:00 (0분 40초)
+
+- README에서 이미 구현된 이미지 업로드를 향후 계획으로 설명하던 항목과 외부 연동 링크를 제거했다.
+- 이미지 업로드의 구현 여부를 별도 설명으로 추가하지 않고, 해당 계획 항목만 삭제했다.
+
+## Deploy cached brightness corrections and README cleanup 2026-08-03 01:34:50 ~ 2026-08-03 01:35:26 (0분 36초)
+
+- 정적 검사에서 타입검사 2종, 53개 테스트, Vite 프로덕션 빌드가 모두 성공했다.
+- 캐시된 명도 보정과 부분 갱신, 어두운 채도 보정 스와치, README 정리 변경분을 `mapedit` Cloudflare Pages에 배포했다.
+- 배포 URL은 `https://a731fda3.mapedit.pages.dev`이며 canonical 주소 `https://mapedit.pages.dev/`가 HTTP 200을 반환하는 것을 확인했다.
+- Worker, D1, 마이그레이션은 변경하거나 배포하지 않았다.
