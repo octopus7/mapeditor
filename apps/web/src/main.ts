@@ -316,6 +316,19 @@ function setupAuthUi(): void {
 }
 setupAuthUi();
 
+function setupDeveloperAccessUi(): void {
+  const existing = document.querySelector<HTMLSpanElement>("#developer-access");
+  if (!existing) return;
+  const button = document.createElement("button");
+  button.type = "button";
+  button.id = existing.id;
+  button.className = existing.className;
+  button.textContent = existing.textContent;
+  button.disabled = true;
+  existing.replaceWith(button);
+}
+setupDeveloperAccessUi();
+
 const canvas = document.querySelector<HTMLCanvasElement>("#map-canvas")!;
 const canvasFrame = document.querySelector<HTMLDivElement>("#canvas-frame")!;
 const context = canvas.getContext("2d")!;
@@ -1069,8 +1082,12 @@ async function initializeDeploymentTime(): Promise<void> {
 }
 
 async function initializeDeveloperAccess(apiBaseUrl: string): Promise<void> {
-  const target = document.querySelector<HTMLSpanElement>("#developer-access");
+  const target = document.querySelector<HTMLButtonElement>("#developer-access");
   if (!target) return;
+  target.disabled = true;
+  target.onclick = () => {
+    if (!target.disabled) window.location.assign("/diag/");
+  };
   try {
     const response = await fetch(`${apiBaseUrl}/health`, {
       cache: "no-store",
@@ -1078,7 +1095,7 @@ async function initializeDeveloperAccess(apiBaseUrl: string): Promise<void> {
     });
     if (!response.ok) throw new Error("health check failed");
     const body = await response.json() as { developerDebug?: unknown };
-    target.classList.remove("is-on", "is-off", "is-old", "is-unavailable");
+    target.classList.remove("is-on", "is-off", "is-old", "is-unavailable", "is-link");
     if (typeof body.developerDebug !== "boolean") {
       target.textContent = "Developer: old API";
       target.classList.add("is-old");
@@ -1087,6 +1104,8 @@ async function initializeDeveloperAccess(apiBaseUrl: string): Promise<void> {
     }
     target.textContent = body.developerDebug ? "Developer: yes" : "Developer: no";
     target.classList.add(body.developerDebug ? "is-on" : "is-off");
+    target.disabled = !body.developerDebug;
+    if (body.developerDebug) target.classList.add("is-link");
     target.title = body.developerDebug
       ? "This browser IP is allowlisted for developer diagnostics."
       : "This browser IP is not allowlisted for developer diagnostics.";
@@ -1094,6 +1113,8 @@ async function initializeDeveloperAccess(apiBaseUrl: string): Promise<void> {
     target.textContent = "Developer: unavailable";
     target.classList.remove("is-on", "is-off", "is-old");
     target.classList.add("is-unavailable");
+    target.classList.remove("is-link");
+    target.disabled = true;
     target.title = "The Worker health check could not be completed.";
   }
 }

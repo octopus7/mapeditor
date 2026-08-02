@@ -354,3 +354,7 @@
 
 - Fixed the missing `account-menu-section` ID so the logged-in profile appears inside the opened menu and remains available for logout through the profile dialog.
 - Passed web checks (39), API tests (17), deployed Worker and Pages, and verified the cache-busted production bundle contains the fix.
+## Developer status opens diagnostics 2026-08-02 21:33:11 ~ 2026-08-02 21:34:40 (1분 29초)
+
+- Changed the `Developer: yes` whitelist status into an enabled control that navigates to `/diag/`; `no`, `old API`, and `unavailable` remain disabled.
+- Passed web checks (39), API tests (17), deployed Worker and Pages, and verified the live bundle and Worker health.
