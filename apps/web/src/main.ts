@@ -291,6 +291,7 @@ function setupAuthUi(): void {
 
   const accountSection = document.createElement("div");
   accountSection.className = "account-menu-section hidden";
+  accountSection.id = "account-menu-section";
   accountSection.innerHTML = `
     <span class="file-menu-heading">계정</span>
     <div id="account-menu-slot" class="account-menu-slot"></div>`;

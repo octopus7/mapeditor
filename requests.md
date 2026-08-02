@@ -339,3 +339,18 @@
 - Replaced the always-visible Google widget with a text `로그인` trigger and a separate authentication dialog.
 - Moved the successful user profile control into the opened file menu; guest users only see the text login button.
 - Preserved existing user changes, passed web checks (39), API tests (17), deployed Worker and Pages, and verified the live bundle and Worker health.
+
+## Diagnose image service URL configuration 2026-08-02 21:27:07 ~ 2026-08-02 21:27:18 (0분 11초)
+
+- Confirmed `MEME_UPLOAD_BASE_URL` is the Worker upload target and `MEME_IMAGE_ORIGIN` is the public image URL validation origin; both configured values are syntactically correct.
+- Confirmed the reported 404 is caused by the missing or unrouted upstream `POST /v1/images` endpoint, not by the Worker URL format alone.
+
+## Align image upload with the actual meme REST flow 2026-08-02 21:27:19 ~ 2026-08-02 21:31:19 (4분 00초)
+
+- Inspected the public `octopus7/meme` source and confirmed its flow is `origin-admin POST /internal/v1/blobs` with the origin mutation bearer token, followed by construction of public `/i/<hash>.<extension>` and `/t/<hash>` URLs.
+- Confirmed the public meme Web Worker `/api/images` is session-cookie and same-origin protected, so it is not directly callable by the mapeditor Worker.
+- Blocked the implementation pending the actual reachable origin-admin hostname; the current `meme-admin.devtuna.win` is the web Worker host and does not expose the origin API.
+## Restore logged-in account menu visibility 2026-08-02 21:30:18 ~ 2026-08-02 21:32:10 (1분 52초)
+
+- Fixed the missing `account-menu-section` ID so the logged-in profile appears inside the opened menu and remains available for logout through the profile dialog.
+- Passed web checks (39), API tests (17), deployed Worker and Pages, and verified the cache-busted production bundle contains the fix.
