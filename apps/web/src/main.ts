@@ -276,10 +276,9 @@ document.querySelector<HTMLDivElement>("#app")!.innerHTML = `
 `;
 
 function setupAuthUi(): void {
-  const topActions = document.querySelector<HTMLElement>(".top-actions");
   const authSlot = document.querySelector<HTMLDivElement>("#auth-slot");
   const fileMenu = document.querySelector<HTMLElement>("#file-menu");
-  if (!topActions || !authSlot || !fileMenu) return;
+  if (!authSlot || !fileMenu) return;
 
   const loginTrigger = document.createElement("button");
   loginTrigger.type = "button";
@@ -287,7 +286,6 @@ function setupAuthUi(): void {
   loginTrigger.id = "login-trigger";
   loginTrigger.textContent = "로그인";
   loginTrigger.setAttribute("aria-haspopup", "dialog");
-  topActions.prepend(loginTrigger);
 
   const accountSection = document.createElement("div");
   accountSection.className = "account-menu-section hidden";
@@ -295,6 +293,7 @@ function setupAuthUi(): void {
   accountSection.innerHTML = `
     <span class="file-menu-heading">계정</span>
     <div id="account-menu-slot" class="account-menu-slot"></div>`;
+  accountSection.append(loginTrigger);
   fileMenu.prepend(accountSection);
 
   const authDialog = document.createElement("dialog");
@@ -879,7 +878,7 @@ function renderProfile(): void {
 }
 
 function renderLoggedOut(): void {
-  document.querySelector<HTMLElement>("#account-menu-section")?.classList.add("hidden");
+  document.querySelector<HTMLElement>("#account-menu-section")?.classList.remove("hidden");
   document.querySelector<HTMLDivElement>("#account-menu-slot")?.replaceChildren();
   document.querySelector<HTMLButtonElement>("#login-trigger")?.classList.remove("hidden");
 }

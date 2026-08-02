@@ -365,3 +365,9 @@
 - Updated the upstream response validation to use meme's `mimeType` and `size` fields and derive safe public `/i/<hash>.<extension>` and `/t/<hash>` URLs from `MEME_IMAGE_ORIGIN`.
 - Used the existing Git-ignored `.dev.vars` token without exposing its value and successfully uploaded one in-memory 32x32 random-pixel PNG; meme returned HTTP 201 and the public image URL returned HTTP 200 as `image/png`.
 - Passed type checks, tests (39), and the production Worker deployment; verified the live Worker health endpoint.
+
+## Move login button into file menu 2026-08-02 21:36:10 ~ 2026-08-02 21:38:27 (2분 17초)
+
+- Removed the guest `로그인` button from the top action bar and placed it in the opened file menu's account section.
+- Kept the logged-in profile control in the same account section and made the guest account section visible only through the menu.
+- Passed web checks (39), API tests (18), deployed Worker and Pages, and verified the production bundle and Worker health.
