@@ -36,8 +36,9 @@ describe("editor model", () => {
 
   it("raises non-water tiles by one level and keeps water at the base level", () => {
     const map = createInitialMap();
+    expect(paintGround(map, 0, 0, "stone")).toBe(true);
     expect(setTileElevation(map, 0, 0, 1)).toBe(true);
-    expect(map.cells[0].elevation).toBe(1);
+    expect(map.cells[0]).toMatchObject({ ground: "stone", elevation: 1 });
     expect(setTileElevation(map, 0, 0, 1)).toBe(false);
 
     expect(paintGround(map, 0, 0, "water")).toBe(true);

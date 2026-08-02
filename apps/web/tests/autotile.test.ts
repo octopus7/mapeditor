@@ -8,6 +8,7 @@ import {
   getBridgeConnectionShape,
   getBridgeTextureRotation,
   getPropNeighborMask,
+  getTransitionCorrections,
   getNeighborMask,
   getTransitionLayers,
   getWaterBankMask,
@@ -98,6 +99,24 @@ describe("autotile calculations", () => {
       {
         ground: "stone",
         mask: NEIGHBOR_MASK.N | NEIGHBOR_MASK.E | NEIGHBOR_MASK.NE,
+        priority: GROUND_PRIORITY.stone,
+      },
+    ]);
+  });
+
+  it("places a correction strip on the higher-priority neighboring tile", () => {
+    const map = createMap([
+      ["grass", "stone", "grass"],
+      ["grass", "dirt", "grass"],
+      ["grass", "grass", "grass"],
+    ]);
+
+    expect(getTransitionCorrections(map, 1, 1)).toEqual([
+      {
+        ground: "dirt",
+        targetColumn: 1,
+        targetRow: 0,
+        mask: NEIGHBOR_MASK.S,
         priority: GROUND_PRIORITY.stone,
       },
     ]);

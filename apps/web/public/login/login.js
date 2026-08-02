@@ -39,8 +39,11 @@
       const expectedState = sessionStorage.getItem(stateKey);
       const expectedNonce = sessionStorage.getItem(nonceKey);
       clearRedirectState();
+      if (googleError === "redirect_uri_mismatch") {
+        throw new Error(`Google Cloud Console에 Authorized redirect URI를 등록하세요: ${new URL("/login/", window.location.origin).href}`);
+      }
       if (googleError || !credential || !expectedState || hash.get("state") !== expectedState || !expectedNonce) {
-        throw new Error("Google 로그인 요청을 확인할 수 없습니다.");
+        throw new Error(googleError ? `Google 로그인 오류: ${googleError}` : "Google 로그인 요청을 확인할 수 없습니다.");
       }
       setStatus("Google 로그인 확인 중…");
       const response = await fetch(`${config.apiBaseUrl.replace(/\/+$/u, "")}/auth/google`, {

@@ -73,3 +73,11 @@
 - 질문 이유: 실제 `POST /internal/v1/blobs` REST 형식으로 mapeditor Worker를 수정하려면 `meme-admin.devtuna.win`과 분리된 origin-admin 주소와 origin mutation token이 필요하며, 현재 공개 DNS에서 해당 주소를 확인할 수 없기 때문이다.
 - 답변 시각: 2026-08-02 21:35:00 KST
 - 답변: 사용자가 제공한 `https://meme-admin.devtuna.win/healthz` 응답으로 해당 주소가 실제로 연결 가능한 meme origin endpoint임을 확인했다. 따라서 분리된 문서상의 hostname을 사용하지 않고 이 주소의 `POST /internal/v1/blobs`를 사용했다.
+
+## Pages 배포 범위 확인
+
+- 질문 시각: 2026-08-03 00:37:58 KST
+- 질문 내용: 현재 작업 트리의 웹 변경 전체를 함께 `mapedit.pages.dev` Production에 배포해도 되는가?
+- 질문 이유: 핀치 줌 외에도 웹 영역에 진행 중인 변경이 있어, Pages 배포 시 해당 변경들이 함께 운영에 반영될 수 있음.
+- 답변 시각: 2026-08-03 00:41:00 KST
+- 답변: 사용자가 별도 작업한 핀치 줌을 함께 배포하라고 지시했으므로, 현재 웹 변경을 검증 후 Pages와 Worker 통합 배포에 포함한다.

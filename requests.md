@@ -490,3 +490,21 @@
 - Added iPad touch pinch zoom handling only within the map workspace, using the two-finger midpoint as the zoom focus and preserving two-finger movement as viewport panning.
 - Prevented the browser page gesture from taking over inside `.canvas-scroll` while leaving areas outside the workspace unchanged; an in-progress one-finger edit is rolled back when a pinch begins.
 - Passed web and API typechecks, all 48 tests, and the production build. Deployment, commit, and push were not performed.
+
+## Deploy workspace pinch zoom Pages release 2026-08-03 00:37:00 ~ 2026-08-03 00:37:58 (58초)
+
+- Attempted the authorized production Pages-only deployment using `Deploy-Pages.ps1`, without Worker deployment or D1 migrations.
+- Deployment was blocked because the current dirty web worktree contains unrelated in-progress changes, so the exact production deployment scope requires confirmation.
+
+## Implement elevation UX correction 2026-08-03 00:34:50 ~ 2026-08-03 00:38:31 (3분 41초)
+
+- 제한된 깊이의 노출 면만 렌더링하도록 `drawRaisedTileFace`를 수정하고, 올린 셀의 현재 ground를 직접 사용해 인접 ground 전체를 가리지 않도록 보정했다.
+- `1층 올리기` 선택 모드에서만 elevation=1 셀에 강조색 오버레이와 테두리를 표시하고, 지형/기본 높이/사물/이미지 모드에서는 숨겼다.
+- 올리기 동작이 ground 값을 유지하는 회귀 검사를 보강했으며, 테스트 49개와 웹·API 타입검사를 통과했다. 배포·커밋·푸시는 수행하지 않았다.
+
+## Deploy pinch zoom and adjacent correction layers 2026-08-03 00:40:00 ~ 2026-08-03 00:47:57 (7분 57초)
+
+- 별도 작업된 아이패드 핀치 줌을 포함해 Worker와 Pages Production을 배포했다. 원격 D1 마이그레이션은 적용할 항목이 없었다.
+- 지형 전환에서 원본 타일 내부를 파먹던 렌더링을 제거하고, 더 높은 우선순위의 인접 타일 경계 안쪽에만 보정 스트립을 그리도록 변경했다. 물 단차 보정도 인접 물 타일에 그리도록 이동했다.
+- `레이어` 편집 탭에서는 기본 높이와 1층 올리기 모두 elevation=1 셀을 강조 표시한다.
+- 정적 검사 50개 테스트, 타입검사, 빌드와 운영 health/login 응답 확인을 통과했다. Worker `0546e984-0a0d-4db6-be3d-d42efcb74d43`, Pages `https://8f564ce1.mapedit.pages.dev`.

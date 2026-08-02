@@ -50,6 +50,14 @@ export interface TransitionLayer {
   priority: number;
 }
 
+export interface TransitionCorrection {
+  ground: GroundType;
+  targetColumn: number;
+  targetRow: number;
+  mask: number;
+  priority: number;
+}
+
 /**
  * Removes diagonal connections that do not have both touching orthogonal
  * connections. The remaining bitmasks are the 47 valid Blob tile shapes.
@@ -128,6 +136,51 @@ function getCardinalNeighborMask(
     );
     return neighborGround === ground ? result | direction.bit : result;
   }, 0);
+}
+
+function getOppositeNeighborBit(bit: number): number {
+  if (bit === NEIGHBOR_MASK.N) return NEIGHBOR_MASK.S;
+  if (bit === NEIGHBOR_MASK.E) return NEIGHBOR_MASK.W;
+  if (bit === NEIGHBOR_MASK.S) return NEIGHBOR_MASK.N;
+  return NEIGHBOR_MASK.E;
+}
+
+/**
+ * Returns correction strips for the higher-priority neighboring tile.
+ * The source tile remains visually whole; its edge is painted onto the
+ * neighboring tile instead of cutting into the source tile.
+ */
+export function getTransitionCorrections(
+  map: MapDocument,
+  column: number,
+  row: number,
+): TransitionCorrection[] {
+  if (!isInside(map, column, row)) return [];
+
+  const sourceGround = map.cells[cellIndex(map, column, row)].ground;
+  const sourcePriority = GROUND_PRIORITY[sourceGround];
+  if (sourceGround === "water") return [];
+
+  const corrections: Array<TransitionCorrection | null> = CARDINAL_DIRECTIONS
+    .map((direction) => {
+      const targetColumn = column + direction.column;
+      const targetRow = row + direction.row;
+      if (!isInside(map, targetColumn, targetRow)) return null;
+      const targetGround = map.cells[cellIndex(map, targetColumn, targetRow)].ground;
+      if (
+        targetGround === "water" ||
+        GROUND_PRIORITY[targetGround] <= sourcePriority ||
+        (sourceGround === "grass" && targetGround === "dirt")
+      ) return null;
+      return {
+        ground: sourceGround,
+        targetColumn,
+        targetRow,
+        mask: getOppositeNeighborBit(direction.bit),
+        priority: GROUND_PRIORITY[targetGround],
+      };
+    });
+  return corrections.filter((correction): correction is TransitionCorrection => correction !== null);
 }
 
 /**

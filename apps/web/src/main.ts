@@ -10,7 +10,7 @@ import {
   getBridgeEndpointMask,
   getBridgeTextureRotation,
   getPropNeighborMask,
-  getTransitionLayers,
+  getTransitionCorrections,
   getWaterBankMask,
   NEIGHBOR_MASK,
   type BridgeDirection,
@@ -546,14 +546,23 @@ const waterBankPalettes: Record<GroundType, [number, number, number]> = {
   water: [35, 84, 91],
 };
 function drawWaterBankFace(column: number, row: number, ground: GroundType, direction: WaterBankDirection): void {
-  const x = column * CELL_SIZE;
-  const y = row * CELL_SIZE;
-  // The old all-sides bevel made the water look like a flat top-down overlay.
-  // Keep the side banks almost flush, show the strongest drop at 6 o'clock,
-  // and leave a thin ridge at 12 o'clock for the classic game look.
-  const thickness = direction === "S"
+  const targetColumn = direction === "E" ? column + 1 : direction === "W" ? column - 1 : column;
+  const targetRow = direction === "S" ? row + 1 : direction === "N" ? row - 1 : row;
+  if (targetColumn < 0 || targetColumn >= map.columns || targetRow < 0 || targetRow >= map.rows) return;
+  const targetDirection: WaterBankDirection = direction === "N"
+    ? "S"
+    : direction === "E"
+      ? "W"
+      : direction === "S"
+        ? "N"
+        : "E";
+  const x = targetColumn * CELL_SIZE;
+  const y = targetRow * CELL_SIZE;
+  // Keep the correction on the adjacent water tile. The 6 o'clock side gets
+  // the strongest drop, the 12 o'clock side keeps only a thin ridge.
+  const thickness = targetDirection === "S"
     ? CELL_SIZE * .40
-    : direction === "N"
+    : targetDirection === "N"
       ? CELL_SIZE * .13
       : CELL_SIZE * .07;
   const [r, g, b] = waterBankPalettes[ground];
@@ -564,14 +573,14 @@ function drawWaterBankFace(column: number, row: number, ground: GroundType, dire
   let faceWidth = CELL_SIZE;
   let faceHeight = thickness;
   let gradient: CanvasGradient;
-  if (direction === "N") {
+  if (targetDirection === "N") {
     gradient = context.createLinearGradient(0, y + thickness, 0, y);
-  } else if (direction === "E") {
+  } else if (targetDirection === "E") {
     faceX = x + CELL_SIZE - thickness;
     faceWidth = thickness;
     faceHeight = CELL_SIZE;
     gradient = context.createLinearGradient(x + CELL_SIZE - thickness, 0, x + CELL_SIZE, 0);
-  } else if (direction === "S") {
+  } else if (targetDirection === "S") {
     faceY = y + CELL_SIZE - thickness;
     faceHeight = thickness;
     gradient = context.createLinearGradient(0, y + CELL_SIZE - thickness, 0, y + CELL_SIZE);
@@ -590,11 +599,11 @@ function drawWaterBankFace(column: number, row: number, ground: GroundType, dire
   context.strokeStyle = dark;
   context.lineWidth = 1;
   context.beginPath();
-  if (direction === "N" || direction === "S") {
-    const lineY = direction === "N" ? y + thickness : y + CELL_SIZE - thickness;
+  if (targetDirection === "N" || targetDirection === "S") {
+    const lineY = targetDirection === "N" ? y + thickness : y + CELL_SIZE - thickness;
     context.moveTo(x, lineY); context.lineTo(x + CELL_SIZE, lineY);
   } else {
-    const lineX = direction === "W" ? x + thickness : x + CELL_SIZE - thickness;
+    const lineX = targetDirection === "W" ? x + thickness : x + CELL_SIZE - thickness;
     context.moveTo(lineX, y); context.lineTo(lineX, y + CELL_SIZE);
   }
   context.stroke();
@@ -611,6 +620,7 @@ function drawWaterBank(column: number, row: number, ground: GroundType, mask: nu
 const raisedTileSidePalettes: Record<GroundType, [number, number, number]> = {
   grass: [74, 50, 30], dirt: [91, 58, 34], stone: [73, 74, 66], water: [35, 84, 91],
 };
+const RAISED_FACE_DEPTH = CELL_SIZE * .34;
 function drawRaisedTileFace(column: number, row: number, ground: GroundType, direction: "E" | "S"): void {
   const x = column * CELL_SIZE;
   const y = row * CELL_SIZE;
@@ -618,34 +628,34 @@ function drawRaisedTileFace(column: number, row: number, ground: GroundType, dir
   const shadow = `rgb(${Math.round(r * .72)}, ${Math.round(g * .72)}, ${Math.round(b * .72)})`;
   const dark = `rgb(${Math.round(r * .46)}, ${Math.round(g * .46)}, ${Math.round(b * .46)})`;
   const gradient = direction === "S"
-    ? context.createLinearGradient(0, y + CELL_SIZE, 0, y + CELL_SIZE + CELL_SIZE)
-    : context.createLinearGradient(x + CELL_SIZE, 0, x + CELL_SIZE + CELL_SIZE, 0);
+    ? context.createLinearGradient(0, y + CELL_SIZE, 0, y + CELL_SIZE + RAISED_FACE_DEPTH)
+    : context.createLinearGradient(x + CELL_SIZE, 0, x + CELL_SIZE + RAISED_FACE_DEPTH, 0);
   gradient.addColorStop(0, shadow);
   gradient.addColorStop(.72, shadow);
   gradient.addColorStop(1, dark);
   context.save();
   context.fillStyle = gradient;
-  if (direction === "S") context.fillRect(x, y + CELL_SIZE, CELL_SIZE, CELL_SIZE);
-  else context.fillRect(x + CELL_SIZE, y, CELL_SIZE, CELL_SIZE);
+  if (direction === "S") context.fillRect(x, y + CELL_SIZE, CELL_SIZE, RAISED_FACE_DEPTH);
+  else context.fillRect(x + CELL_SIZE, y, RAISED_FACE_DEPTH, CELL_SIZE);
   context.globalAlpha = .52;
   context.strokeStyle = dark;
   context.lineWidth = 1;
   context.beginPath();
   if (direction === "S") {
-    context.moveTo(x, y + CELL_SIZE + 1); context.lineTo(x + CELL_SIZE, y + CELL_SIZE + 1);
+    context.moveTo(x, y + CELL_SIZE + RAISED_FACE_DEPTH); context.lineTo(x + CELL_SIZE, y + CELL_SIZE + RAISED_FACE_DEPTH);
   } else {
-    context.moveTo(x + CELL_SIZE + 1, y); context.lineTo(x + CELL_SIZE + 1, y + CELL_SIZE);
+    context.moveTo(x + CELL_SIZE + RAISED_FACE_DEPTH, y); context.lineTo(x + CELL_SIZE + RAISED_FACE_DEPTH, y + CELL_SIZE);
   }
   context.stroke();
   context.restore();
 }
-function drawRaisedTile(column: number, row: number, ground: GroundType): void {
+function drawRaisedTile(column: number, row: number): void {
   const current = map.cells[cellIndex(map, column, row)];
-  if (current.elevation !== 1 || ground === "water") return;
+  if (current.elevation !== 1 || current.ground === "water") return;
   const south = row + 1 < map.rows ? map.cells[cellIndex(map, column, row + 1)] : null;
   const east = column + 1 < map.columns ? map.cells[cellIndex(map, column + 1, row)] : null;
-  if (!south || south.elevation < current.elevation) drawRaisedTileFace(column, row, ground, "S");
-  if (!east || east.elevation < current.elevation) drawRaisedTileFace(column, row, ground, "E");
+  if (!south || south.elevation < current.elevation) drawRaisedTileFace(column, row, current.ground, "S");
+  if (!east || east.elevation < current.elevation) drawRaisedTileFace(column, row, current.ground, "E");
 }
 function createTransitionPath(column: number, row: number, mask: number): Path2D {
   const x = column * CELL_SIZE;
@@ -665,14 +675,37 @@ function createTransitionPath(column: number, row: number, mask: number): Path2D
 }
 function drawGround(column: number, row: number, ground: GroundType): void {
   drawGroundTexture(column, row, ground);
-  for (const layer of getTransitionLayers(map, column, row)) {
-    context.save();
-    context.clip(createTransitionPath(column, row, layer.mask));
-    drawGroundTexture(column, row, layer.ground);
-    context.restore();
+}
+function drawGroundCorrection(ground: GroundType, targetColumn: number, targetRow: number, mask: number): void {
+  context.save();
+  context.clip(createTransitionPath(targetColumn, targetRow, mask));
+  drawGroundTexture(targetColumn, targetRow, ground);
+  context.restore();
+}
+function drawGroundCorrections(): void {
+  for (let row = 0; row < map.rows; row += 1) for (let column = 0; column < map.columns; column += 1) {
+    for (const correction of getTransitionCorrections(map, column, row)) {
+      drawGroundCorrection(correction.ground, correction.targetColumn, correction.targetRow, correction.mask);
+    }
+    const ground = map.cells[cellIndex(map, column, row)].ground;
+    const waterBankMask = getWaterBankMask(map, column, row);
+    if (waterBankMask) drawWaterBank(column, row, ground, waterBankMask);
   }
-  const waterBankMask = getWaterBankMask(map, column, row);
-  if (waterBankMask) drawWaterBank(column, row, ground, waterBankMask);
+}
+function drawElevationHighlights(): void {
+  if (selectedLayer !== "ground" || selectedGroundEditTab !== "elevation") return;
+  context.save();
+  context.fillStyle = "rgba(255, 207, 69, .22)";
+  context.strokeStyle = "rgba(255, 184, 35, .98)";
+  context.lineWidth = 2;
+  for (let row = 0; row < map.rows; row += 1) for (let column = 0; column < map.columns; column += 1) {
+    if (map.cells[cellIndex(map, column, row)].elevation !== 1) continue;
+    const x = column * CELL_SIZE;
+    const y = row * CELL_SIZE;
+    context.fillRect(x, y, CELL_SIZE, CELL_SIZE);
+    context.strokeRect(x + 1, y + 1, CELL_SIZE - 2, CELL_SIZE - 2);
+  }
+  context.restore();
 }
 const propScale: Record<PropType, number> = {
   "broadleaf-tree": 2.15, "pine-tree": 2.05, shrub: 1.25, boulder: 1.35, "fallen-log": 1.65, footbridge: 1.65,
@@ -859,9 +892,11 @@ function render(): void {
   for (let row = 0; row < map.rows; row += 1) for (let column = 0; column < map.columns; column += 1) {
     drawGround(column, row, map.cells[cellIndex(map, column, row)].ground);
   }
+  drawGroundCorrections();
   for (let row = 0; row < map.rows; row += 1) for (let column = 0; column < map.columns; column += 1) {
-    drawRaisedTile(column, row, map.cells[cellIndex(map, column, row)].ground);
+    drawRaisedTile(column, row);
   }
+  drawElevationHighlights();
   for (let row = 0; row < map.rows; row += 1) for (let column = 0; column < map.columns; column += 1) {
     const prop = map.cells[cellIndex(map, column, row)].prop;
     if (!prop) continue;
@@ -2511,6 +2546,7 @@ function setGroundEditTab(tab: GroundEditTab): void {
   });
   document.querySelector("#terrain-palette")?.classList.toggle("hidden", tab !== "terrain");
   document.querySelector("#elevation-palette")?.classList.toggle("hidden", tab !== "elevation");
+  render();
 }
 function setTileElevationOption(elevation: TileElevation): void {
   selectedTileElevation = elevation;
@@ -2519,6 +2555,7 @@ function setTileElevationOption(elevation: TileElevation): void {
     button.classList.toggle("selected", active);
     button.setAttribute("aria-checked", String(active));
   });
+  render();
 }
 const imageModeCopy: Record<PropMode, { label: string; hint: string }> = {
   place: { label: "배치", hint: "이미지를 고른 뒤 맵을 클릭하면 배치합니다." },
@@ -2669,6 +2706,7 @@ document.querySelectorAll<HTMLButtonElement>("[data-layer]").forEach((button) =>
   document.querySelector("#prop-palette")!.classList.toggle("hidden", selectedLayer !== "prop");
   document.querySelector("#image-palette")!.classList.toggle("hidden", selectedLayer !== "image");
   renderImageDetails();
+  render();
 }));
 document.querySelectorAll<HTMLButtonElement>("[data-ground-edit-tab]").forEach((button) => button.addEventListener("click", () => {
   setGroundEditTab(button.dataset.groundEditTab as GroundEditTab);
