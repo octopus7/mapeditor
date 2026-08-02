@@ -3,9 +3,12 @@ import {
   cellIndex, cloneMap, createInitialMap, deserializeMap, paintGround, placeProp, serializeMap,
   type GroundType, type MapDocument, type PropType,
 } from "./editor-model";
+import { AuthClient, parsePublicAppConfig, type AuthSession } from "./auth-client";
 
 const CELL_SIZE = 36;
 const STORAGE_KEY = "mapeditor-draft-v1";
+const AUTH_STORAGE_KEY = "mapeditor-auth-v2";
+const DEFAULT_DISPLAY_NAME = "새유저";
 const groundOptions: Array<{ id: GroundType; label: string; hint: string }> = [
   { id: "grass", label: "풀", hint: "부드러운 초지" },
   { id: "dirt", label: "흙", hint: "산책로와 둔덕" },
@@ -34,6 +37,10 @@ let lastPaintedCell = "";
 let history: MapDocument[] = [];
 let future: MapDocument[] = [];
 let saveTimer: number | undefined;
+let authClient: AuthClient | null = null;
+let authSession: AuthSession | null = null;
+let googleClientId = "";
+let googleIdentityLoadPromise: Promise<void> | null = null;
 
 document.querySelector<HTMLDivElement>("#app")!.innerHTML = `
   <div class="app-shell">
@@ -47,6 +54,7 @@ document.querySelector<HTMLDivElement>("#app")!.innerHTML = `
         <input id="map-name" value="${escapeHtml(map.name)}" maxlength="48" />
       </div>
       <div class="top-actions">
+        <div class="auth-slot" id="auth-slot"><span class="auth-note">로그인 준비 중</span></div>
         <button class="button ghost" id="undo" title="실행 취소 (Ctrl+Z)">↶ <span>실행 취소</span></button>
         <button class="button ghost" id="redo" title="다시 실행 (Ctrl+Shift+Z)">↷</button>
         <button class="button export" id="export-json">JSON 저장</button>
@@ -96,7 +104,7 @@ document.querySelector<HTMLDivElement>("#app")!.innerHTML = `
         <div class="canvas-scroll"><div class="canvas-frame">
           <canvas id="map-canvas" aria-label="28 곱하기 18 타일 지도" tabindex="0"></canvas>
         </div></div>
-        <div class="stage-footer"><span><b>28 × 18</b> 셀</span><span id="cursor-status">셀 위에 커서를 올려보세요</span><span class="footer-links">로컬 초안 · <a href="https://mapedit.pages.dev/cdn-cgi/trace" target="_blank" rel="noopener noreferrer">cdn trace</a> · <a href="https://github.com/octopus7/mapeditor" target="_blank" rel="noopener noreferrer">github</a></span></div>
+        <div class="stage-footer"><span><b>28 × 18</b> 셀</span><span id="cursor-status">셀 위에 커서를 올려보세요</span><span class="footer-links">로컬 초안 · <button type="button" id="open-page-qr">page qr</button> · <a href="https://mapedit.pages.dev/cdn-cgi/trace" target="_blank" rel="noopener noreferrer">cdn trace</a> · <a href="https://github.com/octopus7/mapeditor" target="_blank" rel="noopener noreferrer">github</a></span></div>
       </section>
 
       <aside class="reference-panel" aria-label="레이아웃 참고 이미지">
@@ -114,6 +122,20 @@ document.querySelector<HTMLDivElement>("#app")!.innerHTML = `
     </main>
   </div>
   <dialog id="reference-dialog"><button id="close-reference" aria-label="닫기">×</button><img src="/assets/forest-creek-reference.png" alt="개울이 있는 숲 레이아웃 참고 이미지" /></dialog>
+  <dialog id="page-qr-dialog" class="qr-dialog" aria-labelledby="page-qr-title">
+    <strong id="page-qr-title">페이지 접속 QR 코드</strong>
+    <img src="/assets/mapedit-page-qr.svg" alt="https://mapedit.pages.dev 접속 QR 코드" />
+    <span>아무 곳이나 누르면 닫힙니다.</span>
+  </dialog>
+  <dialog id="profile-dialog" class="profile-dialog">
+    <form method="dialog">
+      <div class="profile-heading"><span class="profile-avatar" id="profile-avatar">?</span><div><small>Google 계정</small><strong id="profile-email"></strong></div></div>
+      <label for="profile-name">표시 이름</label>
+      <input id="profile-name" maxlength="40" autocomplete="nickname" />
+      <p class="profile-message" id="profile-message">변경한 이름은 계정 설정에 저장됩니다.</p>
+      <div class="profile-actions"><button class="button ghost" value="cancel">닫기</button><button class="button danger" type="button" id="logout">로그아웃</button><button class="button primary" type="button" id="save-profile">이름 저장</button></div>
+    </form>
+  </dialog>
 `;
 
 const canvas = document.querySelector<HTMLCanvasElement>("#map-canvas")!;
@@ -235,6 +257,166 @@ function download(content: Blob, filename: string): void {
   const link = document.createElement("a"); link.href = URL.createObjectURL(content); link.download = filename; link.click(); URL.revokeObjectURL(link.href);
 }
 
+function saveAuthSession(session: AuthSession | null): void {
+  authSession = session;
+  if (session) sessionStorage.setItem(AUTH_STORAGE_KEY, JSON.stringify(session));
+  else sessionStorage.removeItem(AUTH_STORAGE_KEY);
+}
+
+function restoreAuthSession(): AuthSession | null {
+  const raw = sessionStorage.getItem(AUTH_STORAGE_KEY);
+  if (!raw) return null;
+  try {
+    const session = JSON.parse(raw) as Partial<AuthSession>;
+    if (
+      typeof session.token !== "string" ||
+      typeof session.profile?.id !== "string" ||
+      typeof session.profile.email !== "string" ||
+      typeof session.profile.displayName !== "string"
+    ) return null;
+    return session as AuthSession;
+  } catch {
+    return null;
+  }
+}
+
+function renderProfile(): void {
+  const slot = document.querySelector<HTMLDivElement>("#auth-slot")!;
+  if (!authSession) return;
+  const button = document.createElement("button");
+  const avatar = document.createElement("span");
+  const name = document.createElement("strong");
+  button.type = "button";
+  button.className = "profile-button";
+  const shouldRename = authSession.profile.displayName === DEFAULT_DISPLAY_NAME;
+  button.title = shouldRename ? "표시 이름을 수정하세요." : "계정 정보 수정";
+  button.setAttribute("aria-label", shouldRename ? "표시 이름 수정하기" : "내 계정 정보 열기");
+  avatar.textContent = authSession.profile.displayName.trim().charAt(0).toUpperCase() || "?";
+  name.textContent = authSession.profile.displayName;
+  button.append(avatar, name);
+  button.addEventListener("click", openProfileDialog);
+  slot.replaceChildren(button);
+}
+
+function openProfileDialog(): void {
+  if (!authSession) return;
+  document.querySelector("#profile-avatar")!.textContent = authSession.profile.displayName.charAt(0).toUpperCase() || "?";
+  document.querySelector("#profile-email")!.textContent = authSession.profile.email;
+  (document.querySelector("#profile-name") as HTMLInputElement).value = authSession.profile.displayName;
+  document.querySelector("#profile-message")!.textContent = "변경한 이름은 계정 설정에 저장됩니다.";
+  document.querySelector<HTMLDialogElement>("#profile-dialog")!.showModal();
+}
+
+function renderAuthNote(message: string, title?: string): void {
+  const note = document.createElement("span");
+  note.className = "auth-note";
+  note.textContent = message;
+  if (title) note.title = title;
+  document.querySelector<HTMLDivElement>("#auth-slot")!.replaceChildren(note);
+}
+
+function renderAuthRetry(label: string, retry: () => void): void {
+  const button = document.createElement("button");
+  button.type = "button";
+  button.className = "auth-retry";
+  button.textContent = label;
+  button.addEventListener("click", retry);
+  document.querySelector<HTMLDivElement>("#auth-slot")!.replaceChildren(button);
+}
+
+async function loadGoogleIdentity(): Promise<void> {
+  if (window.google) return;
+  if (googleIdentityLoadPromise) return googleIdentityLoadPromise;
+  googleIdentityLoadPromise = new Promise<void>((resolve, reject) => {
+    const existing = document.querySelector<HTMLScriptElement>('script[src="https://accounts.google.com/gsi/client"]');
+    const script = existing ?? document.createElement("script");
+    const onLoad = (): void => window.google
+      ? resolve()
+      : reject(new Error("Google Identity API가 준비되지 않았습니다."));
+    const onError = (): void => reject(new Error("Google 로그인 라이브러리를 불러오지 못했습니다."));
+    script.addEventListener("load", onLoad, { once: true });
+    script.addEventListener("error", onError, { once: true });
+    if (!existing) {
+      script.src = "https://accounts.google.com/gsi/client";
+      script.async = true;
+      document.head.append(script);
+    }
+  });
+  try {
+    await googleIdentityLoadPromise;
+  } catch (error) {
+    googleIdentityLoadPromise = null;
+    throw error;
+  }
+}
+
+async function handleGoogleCredential(response: GoogleCredentialResponse): Promise<void> {
+  if (!authClient) return;
+  renderAuthNote("로그인 확인 중…");
+  try {
+    saveAuthSession(await authClient.login(response.credential));
+    renderProfile();
+  } catch (error) {
+    console.error("Google login failed", error);
+    renderAuthRetry("로그인 실패 · 다시 시도", () => { void renderGoogleSignIn(); });
+  }
+}
+
+async function renderGoogleSignIn(): Promise<void> {
+  const slot = document.querySelector<HTMLDivElement>("#auth-slot")!;
+  if (!googleClientId) {
+    renderAuthNote("로그인 설정 필요", "app-config.json에 Google OAuth 클라이언트 ID를 설정해야 합니다.");
+    return;
+  }
+  renderAuthNote("Google 로그인 로딩…");
+  try {
+    await loadGoogleIdentity();
+    if (!window.google) throw new Error("Google Identity API가 준비되지 않았습니다.");
+    slot.replaceChildren();
+    window.google.accounts.id.initialize({
+      client_id: googleClientId,
+      callback: (response) => { void handleGoogleCredential(response); },
+      ux_mode: "popup",
+    });
+    window.google.accounts.id.renderButton(slot, {
+      theme: "outline", size: "medium", shape: "rectangular", text: "signin_with", locale: "ko", width: 200,
+    });
+  } catch (error) {
+    console.error("Google Identity initialization failed", error);
+    renderAuthRetry("로그인 다시 시도", () => { void renderGoogleSignIn(); });
+  }
+}
+
+async function initializeAuth(): Promise<void> {
+  renderAuthNote("로그인 준비 중");
+  try {
+    const configResponse = await fetch("/app-config.json", { cache: "no-store" });
+    if (!configResponse.ok) throw new Error("앱 설정 파일을 불러오지 못했습니다.");
+    const config = parsePublicAppConfig(await configResponse.json());
+    if (!config.apiBaseUrl || !config.googleClientId) {
+      renderAuthNote("로그인 설정 필요", "app-config.json에 API 주소와 Google OAuth 클라이언트 ID를 설정해야 합니다.");
+      return;
+    }
+    authClient = new AuthClient(config.apiBaseUrl);
+    googleClientId = config.googleClientId;
+    const restored = restoreAuthSession();
+    if (restored) {
+      try {
+        const verified = await authClient.me(restored.token);
+        saveAuthSession({ token: restored.token, profile: verified.profile });
+        renderProfile();
+        return;
+      } catch {
+        saveAuthSession(null);
+      }
+    }
+    await renderGoogleSignIn();
+  } catch (error) {
+    console.error("Authentication setup failed", error);
+    renderAuthRetry("로그인 서버 다시 연결", () => { void initializeAuth(); });
+  }
+}
+
 canvas.addEventListener("pointerdown", (event) => {
   if (event.button !== 0 && event.button !== 2) return;
   event.preventDefault(); isDrawing = true; canvas.setPointerCapture(event.pointerId); paintAt(event);
@@ -286,7 +468,47 @@ const dialog = document.querySelector<HTMLDialogElement>("#reference-dialog")!;
 document.querySelector("#open-reference")!.addEventListener("click", () => dialog.showModal());
 document.querySelector("#close-reference")!.addEventListener("click", () => dialog.close());
 dialog.addEventListener("click", (event) => { if (event.target === dialog) dialog.close(); });
+const pageQrDialog = document.querySelector<HTMLDialogElement>("#page-qr-dialog")!;
+document.querySelector("#open-page-qr")!.addEventListener("click", () => pageQrDialog.showModal());
+pageQrDialog.addEventListener("click", () => pageQrDialog.close());
+document.querySelector("#save-profile")!.addEventListener("click", async () => {
+  if (!authClient || !authSession) return;
+  const button = document.querySelector<HTMLButtonElement>("#save-profile")!;
+  const message = document.querySelector("#profile-message")!;
+  button.disabled = true;
+  message.textContent = "이름을 저장하는 중…";
+  try {
+    const displayName = (document.querySelector("#profile-name") as HTMLInputElement).value.trim();
+    if (!displayName) throw new Error("표시 이름을 입력해 주세요.");
+    const { profile } = await authClient.updateProfile(authSession.token, displayName);
+    saveAuthSession({ token: authSession.token, profile });
+    renderProfile();
+    document.querySelector<HTMLDialogElement>("#profile-dialog")!.close();
+  } catch (error) {
+    message.textContent = error instanceof Error ? error.message : "이름을 변경하지 못했습니다.";
+  } finally {
+    button.disabled = false;
+  }
+});
+document.querySelector("#logout")!.addEventListener("click", async () => {
+  if (!authClient || !authSession) return;
+  const button = document.querySelector<HTMLButtonElement>("#logout")!;
+  const token = authSession.token;
+  button.disabled = true;
+  try {
+    await authClient.logout(token);
+  } catch (error) {
+    console.error("Logout request failed", error);
+  } finally {
+    saveAuthSession(null);
+    window.google?.accounts.id.disableAutoSelect();
+    document.querySelector<HTMLDialogElement>("#profile-dialog")!.close();
+    button.disabled = false;
+    void renderGoogleSignIn();
+  }
+});
 window.addEventListener("keydown", (event) => {
   if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === "z") { event.preventDefault(); event.shiftKey ? redo() : undo(); }
 });
 render();
+void initializeAuth();

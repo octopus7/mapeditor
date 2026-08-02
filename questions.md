@@ -29,3 +29,17 @@
 - 질문 내용: 아직 정적 페이지가 만들어지지 않은 상태에서 사용자가 먼저 무엇을 해야 하는가?
 - 질문 이유: 에이전트가 대신 수행할 수 있는 초기 구성과 Cloudflare 계정 소유자가 직접 처리해야 하는 인증 단계를 구분하기 위해 질문했다.
 - 답변: 로컬에는 Node.js 22.18.0과 npm 11.18.0이 준비되어 있다. 사용자는 Cloudflare 계정이 준비되어 있는지 확인하고, 에이전트가 Wrangler 로그인을 시작할 때 브라우저에서 OAuth와 필요 시 MFA만 승인하면 된다. Pages 프로젝트 생성, 프로젝트 로컬 구성, ImageGen 자산 생성, 정적 페이지 구현, 프로젝트용 Wrangler 설치, 검사, 빌드와 Direct Upload는 에이전트가 처리할 수 있다. 현재 단계에서는 D1, API Worker, `BOOTSTRAP_TOKEN`과 사용자 도메인을 설정할 필요가 없다.
+
+## Google 로그인 배포용 값 입력 요청
+
+- 질문 시각: 2026-08-02 17:23:04 KST
+- 질문 내용: 저장소 루트의 `.dev.vars`에서 `GOOGLE_CLIENT_ID`와 `SESSION_SECRET` 값을 입력한 뒤 완료 여부를 알려줄 수 있는가?
+- 질문 이유: Worker에서 Google ID 토큰의 audience를 검증하고 애플리케이션 세션을 서명한 뒤 실제 배포·로그인 검증을 완료하려면 두 값이 필요하다.
+- 답변: 2026-08-02 17:31:28 KST에 사용자가 두 값을 `.dev.vars`에 입력했다고 확인했다. 실제 값은 기록하지 않았다.
+
+## Google OAuth JavaScript 출처 등록 요청
+
+- 질문 시각: 2026-08-02 17:37:25 KST
+- 질문 내용: Google OAuth Web application Client의 `Authorized JavaScript origins`에 `https://mapedit.pages.dev`를 등록하고 완료 여부를 알려줄 수 있는가?
+- 질문 이유: 운영 페이지의 Google 로그인 요청이 `400 origin_mismatch`로 거부되어, Google 콘솔에서 실제 Pages origin을 허용해야 했다.
+- 답변: 사용자가 Google 콘솔의 승인된 JavaScript 원본에 `https://mapedit.pages.dev`가 입력된 화면을 제공했다.

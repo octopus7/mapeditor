@@ -1,187 +1,111 @@
 # 배포 아키텍처
 
-## 목적
+## 관리 지점
 
-맵 에디터는 Cloudflare에서 세 개의 독립적인 관리 지점으로 운영한다.
+맵 에디터는 다음 세 리소스를 서로 독립적으로 관리하고 배포한다.
 
-1. 정적 프론트엔드인 Cloudflare Pages
-2. 영구 저장소인 Cloudflare D1
-3. D1에 접근하는 별도 Cloudflare Worker API
+| 관리 지점 | 이름·주소 | 책임 | 변경 수단 |
+|---|---|---|---|
+| Cloudflare Pages | `mapedit` / `https://mapedit.pages.dev` | 정적 맵 편집 UI와 공개 이미지 제공 | 로컬 빌드 후 Wrangler Direct Upload |
+| Cloudflare Worker API | `mapeditor-api` | Google 로그인 검증, 서비스 세션과 프로필 API 제공, D1 접근 | Wrangler Worker 배포 |
+| Cloudflare D1 | `mapeditor-db` | 인증 사용자와 프로필 이름 저장, 향후 맵·청크 payload 저장 | Wrangler 마이그레이션 |
 
-현재 최초 페이지 단계에서는 Pages만 만들고 배포한다. D1과 API Worker는 편집 화면과 로컬 상태 관리가 안정된 이후에 추가한다.
-
-## 전체 구성
+Pages는 D1에 직접 접근하지 않는다. 브라우저는 `mapeditor-api`의 공개 HTTPS API만 호출하고, Worker만 D1 바인딩을 통해 데이터에 접근한다. 현재 D1에는 로그인 사용자의 계정 식별 정보와 사용자가 변경한 표시 이름만 저장하며 맵 작업 데이터는 아직 저장하지 않는다.
 
 ```mermaid
 flowchart LR
-    U["사용자 브라우저"] --> P["Cloudflare Pages<br/>정적 맵 에디터"]
-    P -. "향후 HTTPS API" .-> W["Cloudflare Worker<br/>맵 저장 API"]
-    W -. "D1 Binding" .-> D["Cloudflare D1<br/>맵과 청크 저장"]
+    G["Google Identity Services"] -->|"ID token (JWT)"| P["Cloudflare Pages<br/>mapedit"]
+    P -->|"HTTPS /auth/*"| W["Cloudflare Worker<br/>mapeditor-api"]
+    W -->|"D1 binding"| D["Cloudflare D1<br/>사용자와 프로필"]
 ```
 
-Pages는 D1에 직접 접근하지 않는다. 저장 기능이 추가되면 브라우저가 별도 Worker의 HTTPS API를 호출하고, Worker만 D1 바인딩을 사용한다.
+## Google 로그인 구조
 
-## 관리 지점
+로그인은 Google Identity Services의 팝업 방식으로 처리한다.
 
-| 관리 지점 | 역할 | 배포·변경 수단 | 현재 단계 |
-|---|---|---|---|
-| Cloudflare Pages | HTML, CSS, JavaScript, 이미지와 타일 자산 제공 | 로컬 빌드 후 Wrangler Direct Upload | 사용 |
-| Cloudflare D1 | 맵, 레이어, 청크와 오브젝트 데이터 저장 | Wrangler 마이그레이션 | 아직 사용하지 않음 |
-| Cloudflare Worker | 인증, 입력 검증, D1 읽기·쓰기 API | Wrangler Worker 배포 | 아직 사용하지 않음 |
+1. Pages에서 Google 로그인 버튼을 표시한다. 브라우저에서 사용하는 OAuth Client ID는 공개 식별자이며 시크릿으로 간주하지 않는다.
+2. 사용자가 팝업에서 로그인하면 Google이 Pages의 JavaScript 콜백에 `response.credential` ID 토큰(JWT)을 반환한다.
+3. Pages는 ID 토큰을 `mapeditor-api`의 `POST /auth/google`로 전달한다.
+4. Worker는 토큰의 서명, issuer, audience, 만료 시간을 검증한다. audience는 등록한 Google OAuth Client ID와 일치해야 한다.
+5. Worker는 Google 계정 식별자를 기준으로 D1 사용자 레코드를 생성하거나 조회하고 서비스 세션을 발급한다. 신규 사용자의 초기 표시 이름은 Google 이름이나 이메일을 사용하지 않고 `새유저`로 저장한다.
+6. 로그인 사용자가 계정 설정에서 표시 이름을 바꾸면 Worker API가 해당 이름을 검증하여 D1에 저장한다. 이메일은 일반 페이지에 표시하지 않고 사용자가 프로필 버튼을 눌러 연 계정 정보 창에서만 보여 준다.
 
-## 저장소 구성 계획
+이 구성은 OAuth authorization code를 받는 리다이렉트 방식이 아니다. 따라서 Google Cloud Console의 `Authorized redirect URIs`는 비워 두고 `login_uri`도 설정하지 않는다. 팝업 완료 후 별도의 되돌아오기 URL로 이동하지 않으며, 현재 Pages 문서의 JavaScript 콜백이 ID 토큰을 받는다.
+
+Google Cloud Console의 Web application OAuth Client에는 다음 `Authorized JavaScript origins`를 등록한다. Origin에는 경로와 후행 슬래시를 넣지 않는다.
 
 ```text
-apps/
-├─ web/                    Pages 정적 프론트엔드
-│  ├─ src/
-│  ├─ public/
-│  └─ dist/               Pages 배포 산출물
-└─ api/                    향후 별도 Worker API
-   ├─ src/
-   └─ wrangler.jsonc
-database/
-└─ migrations/            향후 D1 마이그레이션
-scripts/
-├─ Initialize-Secrets.ps1
-├─ Deploy-Pages.ps1       정적 검사 후 Pages 운영 배포
-├─ Deploy-Worker.ps1      향후 추가
-└─ Apply-Migrations.ps1   향후 추가
+https://mapedit.pages.dev
+http://localhost:4173
+http://127.0.0.1:4173
 ```
 
-실제 구현 과정에서 빌드 도구에 맞게 세부 경로는 변경할 수 있지만 Pages, API Worker와 D1 마이그레이션의 책임은 섞지 않는다.
+로컬 origin 두 개는 로컬 로그인을 시험할 때만 필요하다. 이 팝업 로그인만으로는 Google API 접근용 access token 또는 refresh token이 발급되지 않으며 애플리케이션은 Google OAuth Client Secret을 사용하거나 보관하지 않는다. 향후 Google Drive 같은 API 권한이 필요해 authorization code 흐름을 추가할 때에는 Worker 콜백 주소를 확정하고 그 주소를 `Authorized redirect URIs`에 별도로 등록한다.
 
-## 1. Cloudflare Pages
+## Cloudflare Pages
 
-### 역할
-
-- 2D 타일 맵 편집 UI를 정적으로 제공한다.
-- 흙, 돌, 물, 풀 바닥 타일과 나무, 수풀, 바위 같은 사물 이미지를 제공한다.
-- 현재 단계에서는 브라우저 메모리 또는 임시 로컬 상태로만 편집한다.
-- D1 바인딩, Worker Secret과 서버 코드를 포함하지 않는다.
-
-### 배포 방식
-
-- Pages 프로젝트는 Git 연동 대신 Direct Upload 방식으로 생성한다.
-- GitHub Actions와 Pages Git 자동 배포는 사용하지 않는다.
-- 에이전트가 작성한 PowerShell 스크립트에서 정적 검사, 빌드와 Wrangler 배포를 순서대로 실행한다.
-- 빌드 산출물 디렉터리만 Pages에 업로드한다.
-
-최초 프로젝트 생성 예시:
+- 정적 HTML, CSS, JavaScript, 타일과 이미지 자산만 제공한다.
+- Worker Secret, D1 바인딩 또는 서버 전용 코드를 포함하지 않는다.
+- Google OAuth Client ID와 Worker API 기본 주소처럼 브라우저가 알아야 하는 값은 공개 설정으로 취급한다.
+- GitHub Actions와 Pages Git 자동 배포를 사용하지 않는다.
+- 정적 검사에 성공한 빌드 산출물만 Wrangler로 `mapedit` 프로젝트에 Direct Upload 한다.
 
 ```powershell
-npx wrangler pages project create
+npx wrangler pages deploy .\apps\web\dist --project-name mapedit --branch main
 ```
 
-정적 빌드 결과 배포 예시:
+## Cloudflare Worker API
 
-```powershell
-npx wrangler pages deploy .\apps\web\dist --project-name <PAGES_PROJECT_NAME> --branch main
-```
+- Worker 이름은 `mapeditor-api`를 사용한다.
+- 로그인 토큰과 요청 origin을 서버에서 검증하고 허용된 Pages origin에만 CORS 응답을 제공한다.
+- D1 바인딩을 통해 사용자와 프로필 데이터를 읽고 쓴다.
+- 세션 서명 키, 최초 커스텀 토큰 등 민감한 값은 Worker Secrets로 배포한다.
+- Google OAuth Client ID는 토큰 audience 검증에 사용하지만 공개 식별자이므로 평문 환경 설정으로 관리해도 된다.
+- Pages와 별도로 정적 검사와 테스트를 통과한 뒤 Wrangler로 배포한다.
 
-미리보기 배포가 필요하면 운영 배포와 구분되는 branch 이름을 명시한다.
+Worker 배포 주소가 확정되면 Pages의 API 기본 주소와 Worker의 CORS 허용 origin을 함께 확인한다. 운영 CORS에 `*`를 사용하지 않는다.
 
-```powershell
-npx wrangler pages deploy .\apps\web\dist --project-name <PAGES_PROJECT_NAME> --branch preview
-```
+## Cloudflare D1
 
-Direct Upload 프로젝트는 나중에 Git 연동 방식으로 바로 전환할 수 없으므로, 계속 로컬 Wrangler 배포를 유지한다. Git 연동이 필요해지면 별도 Pages 프로젝트를 새로 만든다.
-
-### 배포 순서
-
-1. 의존성을 설치한다.
-2. 린트, 타입 검사와 테스트를 실행한다.
-3. 정적 페이지를 빌드한다.
-4. 빌드 산출물과 필수 이미지가 존재하는지 확인한다.
-5. Wrangler로 Pages에 Direct Upload 한다.
-6. 배포 URL에서 초기 화면, 이미지 로딩과 기본 편집 동작을 확인한다.
-7. 배포가 성공하면 영어 메시지로 커밋하고 현재 브랜치를 푸시한다.
-
-## 2. Cloudflare D1
-
-### 역할
-
-- 맵 메타데이터, 레이어, 청크 payload, 오브젝트와 revision을 저장한다.
-- 실제 시크릿 값은 D1에 저장하지 않는다.
-- 스키마 변경은 `database/migrations`의 SQL 마이그레이션으로 관리한다.
-
-### 도입 시점
-
-- 최초 Pages 편집 화면과 셀·레이어 모델이 안정된 이후에 생성한다.
-- 로컬 D1에서 마이그레이션과 저장 테스트를 먼저 통과시킨 뒤 원격 D1에 적용한다.
-- Pages 배포와 D1 마이그레이션을 하나의 리소스로 취급하지 않는다.
-
-### 변경 순서
-
-1. 새 마이그레이션을 작성한다.
-2. 로컬 D1에 적용하고 테스트한다.
-3. 하위 호환성을 확인한다.
-4. 원격 D1에 적용한다.
-5. D1을 사용하는 Worker를 배포한다.
-
-## 3. Cloudflare Worker API
-
-### 역할
-
-- Pages에서 전달한 요청의 인증과 입력값을 검증한다.
-- D1 바인딩을 통해서만 맵 데이터를 읽고 쓴다.
-- revision 충돌과 오류 응답을 처리한다.
-- `BOOTSTRAP_TOKEN`과 향후 필요한 민감한 값은 Worker Secrets로 사용한다.
-
-### Pages와의 연결
-
-- Pages는 공개 HTTPS 주소를 통해 Worker API를 호출한다.
-- Worker는 허용된 Pages 운영 도메인과 필요한 미리보기 도메인만 CORS 허용 목록에 둔다.
-- 운영에서는 무조건 `*` CORS를 사용하지 않고 요청의 Origin을 검증한다.
-- API 기본 주소는 빌드 시 주입 가능한 비민감 설정으로 관리한다.
-- Cloudflare 배포용 API Token과 애플리케이션의 `BOOTSTRAP_TOKEN`을 분리한다.
-
-### 배포 순서
-
-1. Worker 타입, 린트와 테스트를 실행한다.
-2. D1 마이그레이션 호환성을 확인한다.
-3. 필요한 시크릿 이름과 등록 상태를 확인한다.
-4. Wrangler로 Worker를 배포한다.
-5. 상태 확인과 핵심 API 호출을 검증한다.
-6. 배포가 성공하면 영어 메시지로 커밋하고 현재 브랜치를 푸시한다.
-
-## 환경과 주소
-
-| 환경 | Pages | Worker | D1 |
-|---|---|---|---|
-| 로컬 | 프론트엔드 개발 서버 | Wrangler 로컬 Worker | Wrangler 로컬 D1 |
-| 미리보기 | Pages branch preview | 필요할 때 별도 Worker 환경 | 운영 D1과 분리된 테스트 DB 권장 |
-| 운영 | `*.pages.dev` 또는 Pages 사용자 도메인 | `*.workers.dev` 또는 API 사용자 도메인 | 운영 D1 |
-
-프로젝트 이름, Worker 이름, D1 이름과 사용자 도메인은 실제 리소스를 만들기 전에 확정한다. 문서나 스크립트에 임의의 운영 이름을 하드코딩하지 않는다.
+- 스키마 변경은 `database/migrations`의 순서가 있는 SQL 파일로 관리한다.
+- 새 마이그레이션은 로컬 D1에서 검증한 뒤 원격 D1에 적용한다.
+- 애플리케이션 시크릿이나 Google ID 토큰 원문을 저장하지 않는다.
+- 현재는 인증 사용자와 변경 가능한 표시 이름만 저장한다.
+- 향후 맵 저장을 도입하면 개별 셀 단위가 아니라 청크 payload 단위로 저장한다.
 
 ## 시크릿 경계
 
-- Pages 정적 파일에는 시크릿을 넣지 않는다. 브라우저에 전달되는 값은 모두 공개된 것으로 간주한다.
-- Worker Secret의 실제 값은 Git에서 제외된 `.dev.vars`에만 입력한다.
-- 배포 스크립트는 시크릿 파일 내용을 출력하지 않는다.
-- D1에는 애플리케이션 시크릿 원문을 저장하지 않는다.
+- 실제 로컬 값은 Git에서 제외된 `.dev.vars`에만 입력한다.
+- 버전 관리되는 `secrets.example.env`에는 키 이름과 획득 방법만 기록한다.
+- `scripts/Initialize-Secrets.ps1`은 `.dev.vars`가 없을 때만 예시 파일로 생성하며 기존 파일은 덮어쓰지 않는다.
+- 배포용 Cloudflare 인증과 애플리케이션 시크릿을 서로 재사용하지 않는다.
+- 배포 스크립트와 로그는 시크릿 값을 출력하지 않는다.
 
-## 장애와 롤백 원칙
+## 검증과 배포 순서
 
-- Pages 배포 실패는 Worker와 D1에 영향을 주지 않아야 한다.
-- Worker 배포 실패 시 기존 Worker 버전을 유지하거나 직전 정상 버전으로 되돌린다.
-- D1 스키마는 가능한 한 추가 방식으로 변경하고, 파괴적 변경 전에 백업과 복구 절차를 준비한다.
-- 세 관리 지점의 배포 결과와 URL을 각각 기록한다.
-- 정적 검사, 마이그레이션 또는 배포가 실패하면 커밋과 푸시를 진행하지 않는다.
+세 관리 지점은 각각 독립적으로 다음 순서를 따른다.
 
-## 현재 작업 범위
+1. 대상 코드와 마이그레이션을 로컬에서 검증한다.
+2. 프로젝트에 정의된 정적 검사를 실행한다.
+3. D1 변경이 있으면 로컬 검증 후 원격 마이그레이션을 적용한다.
+4. Wrangler로 해당 Pages 또는 Worker를 배포한다.
+5. 운영 주소에서 핵심 동작을 확인한다.
+6. 모든 단계가 성공한 경우에만 영어 메시지로 커밋하고 현재 브랜치를 푸시한다.
 
-- ImageGen으로 2D 탑다운 숲과 개울용 타일·사물 이미지를 준비한다.
-- D1과 API Worker 없이 동작하는 최초 정적 맵 편집 페이지를 만든다.
-- 정적 검사를 통과한 빌드 산출물을 Cloudflare Pages에 Direct Upload 한다.
-- D1과 별도 Worker는 이후 단계에서 추가한다.
+운영 배포에는 저장소 루트의 PowerShell 스크립트를 사용한다.
+
+```powershell
+.\scripts\Deploy-Worker.ps1
+.\scripts\Deploy-Pages.ps1 -ApiBaseUrl '<DEPLOYED_WORKER_ORIGIN>'
+```
+
+Worker 스크립트는 로컬·원격 D1 마이그레이션, 필요한 Worker Secrets 등록과 Worker 배포를 처리한다. Pages 스크립트는 빌드 후 Git에서 제외된 `.dev.vars`의 공개 Google Client ID와 전달받은 Worker 주소를 배포 산출물의 `app-config.json`에 주입한다.
+
+정적 검사, 원격 마이그레이션 또는 배포가 실패하면 커밋과 푸시를 진행하지 않는다. Pages 배포 실패가 Worker와 D1에 영향을 주거나, Worker 배포 실패가 Pages를 되돌리게 만드는 결합 구조를 만들지 않는다.
 
 ## 참고 문서
 
-- Pages Direct Upload: https://developers.cloudflare.com/pages/get-started/direct-upload/
-- Pages 사용자 도메인: https://developers.cloudflare.com/pages/configuration/custom-domains/
-- Pages 정적 파일 제공: https://developers.cloudflare.com/pages/configuration/serving-pages/
-- Workers 사용자 도메인: https://developers.cloudflare.com/workers/configuration/routing/custom-domains/
-- Workers CORS 예제: https://developers.cloudflare.com/workers/examples/cors-header-proxy/
-- D1: https://developers.cloudflare.com/d1/
+- Cloudflare Pages Direct Upload: https://developers.cloudflare.com/pages/get-started/direct-upload/
+- Cloudflare D1: https://developers.cloudflare.com/d1/
+- Google Identity Services 버튼: https://developers.google.com/identity/gsi/web/guides/display-button
+- Google Identity Services JavaScript API: https://developers.google.com/identity/gsi/web/reference/js-reference

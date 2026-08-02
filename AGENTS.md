@@ -12,7 +12,8 @@
 # 개발 및 배포 지침
 
 - 이 프로젝트는 Cloudflare Pages 정적 프론트엔드, 별도 Cloudflare Worker API와 Cloudflare D1으로 구성한다.
-- 현재 최초 페이지 단계에서는 Pages만 사용하고, D1과 API Worker는 이후 단계에서 추가한다.
+- Pages는 맵 편집 화면을 제공하고, `mapeditor-api` Worker와 `mapeditor-db` D1은 Google 로그인 사용자와 표시 이름만 관리한다.
+- 맵 작업 데이터는 별도 요청 전까지 D1에 저장하지 않는다.
 - 배포는 Wrangler를 사용한다.
 - 배포나 Cloudflare 리소스 구성을 변경하기 전에 저장소 루트의 `deployment-architecture.md`를 반드시 읽고 따른다.
 - Pages, D1과 API Worker를 서로 독립된 관리·배포 지점으로 유지한다.

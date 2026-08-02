@@ -2,7 +2,7 @@ node_modules/
 .wrangler/
 apps/web/dist/
 
-# 실제 시크릿 파일
+# 실제 시크릿 파일 (secrets.example.env는 버전 관리)
 .dev.vars
 .dev.vars.*
 .env

@@ -1,0 +1,27 @@
+{
+  "$schema": "../../node_modules/wrangler/config-schema.json",
+  "name": "mapeditor-api",
+  "main": "src/index.ts",
+  "compatibility_date": "2026-08-02",
+  "compatibility_flags": ["nodejs_compat"],
+  "workers_dev": true,
+  "preview_urls": false,
+  "vars": {
+    "ALLOWED_ORIGINS": "https://mapedit.pages.dev,http://127.0.0.1:4173,http://localhost:4173"
+  },
+  "d1_databases": [
+    {
+      "binding": "DB",
+      "database_name": "mapeditor-db",
+      "database_id": "dd68b67c-69ba-4a57-a289-9d7e97b73e7e",
+      "migrations_dir": "../../database/migrations"
+    }
+  ],
+  "secrets": {
+    "required": ["GOOGLE_CLIENT_ID", "SESSION_SECRET"]
+  },
+  "observability": {
+    "enabled": true,
+    "head_sampling_rate": 1
+  }
+}

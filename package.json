@@ -6,15 +6,22 @@
   "scripts": {
     "dev": "vite --config vite.config.ts",
     "build": "vite build --config vite.config.ts",
-    "typecheck": "tsc --noEmit",
+    "typecheck": "npm run typecheck:web && npm run typecheck:api",
+    "typecheck:web": "tsc --noEmit",
+    "typecheck:api": "tsc --project apps/api/tsconfig.json",
     "test": "vitest run",
+    "generate:qr": "qrcode -t svg -e H -q 4 -w 384 -o apps/web/public/assets/mapedit-page-qr.svg https://mapedit.pages.dev",
     "check": "npm run typecheck && npm run test && npm run build"
   },
   "devDependencies": {
     "@types/node": "latest",
+    "qrcode": "^1.5.4",
     "typescript": "latest",
     "vite": "latest",
     "vitest": "latest",
     "wrangler": "latest"
+  },
+  "dependencies": {
+    "jose": "^6.2.7"
   }
 }
