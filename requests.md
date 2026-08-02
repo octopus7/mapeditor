@@ -358,3 +358,10 @@
 
 - Changed the `Developer: yes` whitelist status into an enabled control that navigates to `/diag/`; `no`, `old API`, and `unavailable` remain disabled.
 - Passed web checks (39), API tests (17), deployed Worker and Pages, and verified the live bundle and Worker health.
+
+## Align meme origin upload contract and verify a random image 2026-08-02 21:34:41 ~ 2026-08-02 21:37:32 (2분 51초)
+
+- Changed the mapeditor Worker upload target from the nonexistent `/v1/images` route to meme's actual `POST /internal/v1/blobs` route.
+- Updated the upstream response validation to use meme's `mimeType` and `size` fields and derive safe public `/i/<hash>.<extension>` and `/t/<hash>` URLs from `MEME_IMAGE_ORIGIN`.
+- Used the existing Git-ignored `.dev.vars` token without exposing its value and successfully uploaded one in-memory 32x32 random-pixel PNG; meme returned HTTP 201 and the public image URL returned HTTP 200 as `image/png`.
+- Passed type checks, tests (39), and the production Worker deployment; verified the live Worker health endpoint.

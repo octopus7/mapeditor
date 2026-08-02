@@ -555,8 +555,8 @@ export function validateMemeImageResponse(value: unknown, imageOrigin: string): 
   const response = value as Record<string, unknown>;
   const hash = response.hash;
   const extension = response.extension;
-  const mimeType = response.mime_type;
-  const byteSize = response.byte_size;
+  const mimeType = response.mimeType;
+  const byteSize = response.size;
   if (typeof hash !== "string" || !/^[0-9a-f]{64}$/u.test(hash)) {
     throw new ApiError(502, "IMAGE_SERVICE_INVALID_RESPONSE", "The image service returned an invalid hash.");
   }
@@ -570,8 +570,8 @@ export function validateMemeImageResponse(value: unknown, imageOrigin: string): 
     throw new ApiError(502, "IMAGE_SERVICE_INVALID_RESPONSE", "The image service returned an invalid byte size.");
   }
   const origin = requireHttpsOrigin(imageOrigin);
-  const originalUrl = validateImageUrl(response.original_url, origin, `/i/${hash}.${extension}`);
-  const thumbnailUrl = validateImageUrl(response.thumbnail_url, origin, `/t/${hash}`);
+  const originalUrl = validateImageUrl(`${origin}/i/${hash}.${extension}`, origin, `/i/${hash}.${extension}`);
+  const thumbnailUrl = validateImageUrl(`${origin}/t/${hash}`, origin, `/t/${hash}`);
   return {
     hash,
     extension: extension as ImageExtension,
@@ -907,14 +907,14 @@ async function handleImageUpload(
   const existing = await images.findByIdempotencyKey(ownerUserId, idempotencyKey);
   if (existing) return json({ image: existing, reused: true });
 
-  const { header: originalFilenameHeader, value: originalFilename } = requireOriginalFilename(request);
+  const { value: originalFilename } = requireOriginalFilename(request);
   const { contentType, contentLength } = requireImageRequestHeaders(request);
   if (!env.MEME_UPLOAD_TOKEN || new TextEncoder().encode(env.MEME_UPLOAD_TOKEN).byteLength < 32) {
     throw new ApiError(503, "SERVER_NOT_CONFIGURED", "The image upload service is not configured.");
   }
   let uploadUrl: URL;
   try {
-    uploadUrl = new URL("/v1/images", env.MEME_UPLOAD_BASE_URL);
+    uploadUrl = new URL("/internal/v1/blobs", env.MEME_UPLOAD_BASE_URL);
   } catch {
     throw new ApiError(503, "SERVER_NOT_CONFIGURED", "The image upload service URL is invalid.");
   }
@@ -930,8 +930,6 @@ async function handleImageUpload(
         Authorization: `Bearer ${env.MEME_UPLOAD_TOKEN}`,
         "Content-Type": contentType,
         "Content-Length": contentLength,
-        "Idempotency-Key": idempotencyKey,
-        "X-Original-Filename": originalFilenameHeader,
       },
       body: request.body,
     });

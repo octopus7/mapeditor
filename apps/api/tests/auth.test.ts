@@ -13,6 +13,7 @@ import {
   type MapRepository,
   validateAvatarIcon,
   validateDisplayName,
+  validateMemeImageResponse,
   type AvatarIcon,
   type GoogleIdentity,
   type Profile,
@@ -567,21 +568,20 @@ describe("user-owned map and image APIs", () => {
     const session = await login(handler, env);
     const hash = "a".repeat(64);
     const upstream = vi.spyOn(globalThis, "fetch").mockImplementation(async (input, init) => {
-      expect(String(input)).toBe("https://meme-admin.devtuna.win/v1/images");
+      expect(String(input)).toBe("https://meme-admin.devtuna.win/internal/v1/blobs");
       const headers = new Headers(init?.headers);
       expect(headers.get("Authorization")).toBe(`Bearer ${env.MEME_UPLOAD_TOKEN}`);
       expect(headers.get("Content-Type")).toBe("image/png");
       expect(headers.get("Content-Length")).toBe("3");
-      expect(headers.get("Idempotency-Key")).toBe("upload-1");
-      expect(headers.get("X-Original-Filename")).toBe("map.png");
+      expect(headers.has("Idempotency-Key")).toBe(false);
+      expect(headers.has("X-Original-Filename")).toBe(false);
       expect(init?.body).toBeTruthy();
       return Response.json({
         hash,
         extension: "png",
-        mime_type: "image/png",
-        byte_size: 3,
-        original_url: `https://meme.devtuna.win/i/${hash}.png`,
-        thumbnail_url: `https://meme.devtuna.win/t/${hash}`,
+        mimeType: "image/png",
+        size: 3,
+        deduplicated: false,
       }, { status: 201 });
     });
 
@@ -637,5 +637,23 @@ describe("user-owned map and image APIs", () => {
     } finally {
       upstream.mockRestore();
     }
+  });
+
+  it("validates meme origin metadata and derives public image URLs", () => {
+    const hash = "b".repeat(64);
+    expect(validateMemeImageResponse({
+      hash,
+      extension: "png",
+      mimeType: "image/png",
+      size: 1024,
+      deduplicated: true,
+    }, "https://meme.devtuna.win")).toEqual({
+      hash,
+      extension: "png",
+      mimeType: "image/png",
+      byteSize: 1024,
+      originalUrl: `https://meme.devtuna.win/i/${hash}.png`,
+      thumbnailUrl: `https://meme.devtuna.win/t/${hash}`,
+    });
   });
 });

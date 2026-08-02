@@ -71,3 +71,5 @@
 - 질문 시각: 2026-08-02 21:31:19 KST
 - 질문 내용: `meme`의 실제 origin-admin 관리 hostname(`ORIGIN_ADMIN_BASE_URL`)을 제공하거나 설정해 줄 수 있는가?
 - 질문 이유: 실제 `POST /internal/v1/blobs` REST 형식으로 mapeditor Worker를 수정하려면 `meme-admin.devtuna.win`과 분리된 origin-admin 주소와 origin mutation token이 필요하며, 현재 공개 DNS에서 해당 주소를 확인할 수 없기 때문이다.
+- 답변 시각: 2026-08-02 21:35:00 KST
+- 답변: 사용자가 제공한 `https://meme-admin.devtuna.win/healthz` 응답으로 해당 주소가 실제로 연결 가능한 meme origin endpoint임을 확인했다. 따라서 분리된 문서상의 hostname을 사용하지 않고 이 주소의 `POST /internal/v1/blobs`를 사용했다.
