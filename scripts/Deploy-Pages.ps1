@@ -1,6 +1,6 @@
 [CmdletBinding()]
 param(
-    [string]$ProjectName = 'mapeditor'
+    [string]$ProjectName = 'mapedit'
 )
 
 Set-StrictMode -Version Latest

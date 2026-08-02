@@ -1,6 +1,6 @@
 # mapeditor
 
-[데모 페이지](https://mapeditor-c2n.pages.dev)
+[데모 페이지](https://mapedit.pages.dev)
 
 2D 기반 맵 에디터 웹
 
