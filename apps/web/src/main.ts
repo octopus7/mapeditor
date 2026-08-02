@@ -21,7 +21,7 @@ import {
   AdminClient, AuthApiError, AuthClient, isAvatarIcon, parsePublicAppConfig,
   type AdminMapSummary, type AdminUser, type AuthSession, type AvatarIcon,
 } from "./auth-client";
-import { ImageLibraryClient, ImageLibraryError, type ImageAsset } from "./image-library";
+import { ImageLibraryClient, ImageLibraryError, isImageUploadOversized, prepareImageForUpload, type ImageAsset } from "./image-library";
 import { getResizeOffsets, MAX_MAP_SIZE, MIN_MAP_SIZE, MapStorageClient, resizeMap, type ResizeAnchor } from "./map-library";
 import { formatDeploymentRelativeTime, formatDeploymentTime, parseDeploymentMetadata } from "./deployment-meta";
 
@@ -537,6 +537,18 @@ const MAX_GROUND_TEXTURE_CACHE_ENTRIES = 1024;
 const groundTextureCache = new Map<string, HTMLCanvasElement>();
 const brightnessCorrectionCanvas = document.createElement("canvas");
 const brightnessCorrectionContext = brightnessCorrectionCanvas.getContext("2d")!;
+const transitionCorrectionCanvas = document.createElement("canvas");
+const transitionCorrectionContext = transitionCorrectionCanvas.getContext("2d")!;
+const transitionCorrectionPatchCanvas = document.createElement("canvas");
+const transitionCorrectionPatchContext = transitionCorrectionPatchCanvas.getContext("2d")!;
+const transitionCorrectionMaskCanvas = document.createElement("canvas");
+const transitionCorrectionMaskContext = transitionCorrectionMaskCanvas.getContext("2d")!;
+const transitionCorrectionBlurCanvas = document.createElement("canvas");
+const transitionCorrectionBlurContext = transitionCorrectionBlurCanvas.getContext("2d")!;
+const TRANSITION_CORRECTION_BLUR = CELL_SIZE / 8;
+let transitionCorrectionCacheReady = false;
+let transitionCorrectionBuildIndex = 0;
+let transitionCorrectionBuildScheduled = false;
 const brightnessCorrectionPatchCanvas = document.createElement("canvas");
 const brightnessCorrectionPatchContext = brightnessCorrectionPatchCanvas.getContext("2d")!;
 brightnessCorrectionPatchContext.imageSmoothingEnabled = false;
@@ -551,6 +563,9 @@ function syncCanvasSize(): void {
   canvas.height = map.rows * CELL_SIZE;
   brightnessCorrectionCanvas.width = canvas.width;
   brightnessCorrectionCanvas.height = canvas.height;
+  transitionCorrectionCanvas.width = canvas.width;
+  transitionCorrectionCanvas.height = canvas.height;
+  invalidateTransitionCorrectionCache();
   invalidateBrightnessCorrectionCache();
   document.querySelector("#map-size")!.textContent = `${map.columns} × ${map.rows}`;
   canvas.setAttribute("aria-label", `${map.columns} 곱하기 ${map.rows} 타일 지도`);
@@ -731,6 +746,7 @@ function processGroundTextureBuildQueue(): void {
     groundTextureBuildScheduled = true;
     window.setTimeout(processGroundTextureBuildQueue, 0);
   } else {
+    invalidateTransitionCorrectionCache();
     scheduleRender();
   }
 }
@@ -742,34 +758,42 @@ function getGroundTextureAtlas(column: number, row: number, ground: GroundType):
   enqueueGroundTextureAtlas(ground, depth);
   return null;
 }
-function drawGroundTexture(column: number, row: number, ground: GroundType): void {
-  const x = column * CELL_SIZE;
-  const y = row * CELL_SIZE;
+function drawGroundTextureTo(
+  targetContext: CanvasRenderingContext2D,
+  column: number,
+  row: number,
+  ground: GroundType,
+  x = column * CELL_SIZE,
+  y = row * CELL_SIZE,
+): void {
   const depth = getGroundTextureDepth(column, row, ground);
   const atlas = getGroundTextureAtlas(column, row, ground);
   if (atlas) {
     const sourceX = ((column * CELL_SIZE) % GROUND_NOISE_TEXTURE_SIZE + GROUND_NOISE_TEXTURE_SIZE) % GROUND_NOISE_TEXTURE_SIZE;
     const sourceY = ((row * CELL_SIZE) % GROUND_NOISE_TEXTURE_SIZE + GROUND_NOISE_TEXTURE_SIZE) % GROUND_NOISE_TEXTURE_SIZE;
-    context.drawImage(atlas, sourceX, sourceY, CELL_SIZE, CELL_SIZE, x, y, CELL_SIZE, CELL_SIZE);
+    targetContext.drawImage(atlas, sourceX, sourceY, CELL_SIZE, CELL_SIZE, x, y, CELL_SIZE, CELL_SIZE);
   } else {
     const [r, g, b] = getGroundBaseColor(ground, depth);
-    context.fillStyle = `rgb(${r}, ${g}, ${b})`;
-    context.fillRect(x, y, CELL_SIZE, CELL_SIZE);
+    targetContext.fillStyle = `rgb(${r}, ${g}, ${b})`;
+    targetContext.fillRect(x, y, CELL_SIZE, CELL_SIZE);
   }
-  context.save(); context.globalAlpha = 0.22;
+  targetContext.save(); targetContext.globalAlpha = 0.22;
   if (ground === "grass") {
-    context.strokeStyle = "#d9e6a2"; context.beginPath();
-    context.moveTo(x + 9, y + 25); context.lineTo(x + 11, y + 20); context.moveTo(x + 25, y + 15); context.lineTo(x + 27, y + 10); context.stroke();
+    targetContext.strokeStyle = "#d9e6a2"; targetContext.beginPath();
+    targetContext.moveTo(x + 9, y + 25); targetContext.lineTo(x + 11, y + 20); targetContext.moveTo(x + 25, y + 15); targetContext.lineTo(x + 27, y + 10); targetContext.stroke();
   } else if (ground === "water") {
-    context.strokeStyle = "#d5f2e9"; context.beginPath();
-    context.moveTo(x + 5, y + 12); context.quadraticCurveTo(x + 13, y + 9, x + 21, y + 12);
-    context.moveTo(x + 15, y + 25); context.quadraticCurveTo(x + 23, y + 22, x + 31, y + 25); context.stroke();
+    targetContext.strokeStyle = "#d5f2e9"; targetContext.beginPath();
+    targetContext.moveTo(x + 5, y + 12); targetContext.quadraticCurveTo(x + 13, y + 9, x + 21, y + 12);
+    targetContext.moveTo(x + 15, y + 25); targetContext.quadraticCurveTo(x + 23, y + 22, x + 31, y + 25); targetContext.stroke();
   } else {
-    context.fillStyle = ground === "stone" ? "#e2e0cf" : "#6e4c2f";
-    context.beginPath(); context.arc(x + 10, y + 11, ground === "stone" ? 2.5 : 1.4, 0, Math.PI * 2); context.fill();
-    context.beginPath(); context.arc(x + 26, y + 25, ground === "stone" ? 3 : 1.2, 0, Math.PI * 2); context.fill();
+    targetContext.fillStyle = ground === "stone" ? "#e2e0cf" : "#6e4c2f";
+    targetContext.beginPath(); targetContext.arc(x + 10, y + 11, ground === "stone" ? 2.5 : 1.4, 0, Math.PI * 2); targetContext.fill();
+    targetContext.beginPath(); targetContext.arc(x + 26, y + 25, ground === "stone" ? 3 : 1.2, 0, Math.PI * 2); targetContext.fill();
   }
-  context.restore();
+  targetContext.restore();
+}
+function drawGroundTexture(column: number, row: number, ground: GroundType): void {
+  drawGroundTextureTo(context, column, row, ground);
 }
 type WaterBankDirection = "N" | "E" | "S" | "W";
 const waterBankPalettes: Record<GroundType, [number, number, number]> = {
@@ -1028,17 +1052,85 @@ function createTransitionCorrectionPath(column: number, row: number, mask: numbe
 function drawGround(column: number, row: number, ground: GroundType): void {
   drawGroundTexture(column, row, ground);
 }
-function drawGroundCorrection(ground: GroundType, targetColumn: number, targetRow: number, mask: number): void {
-  context.save();
-  context.clip(createTransitionCorrectionPath(targetColumn, targetRow, mask));
-  drawGroundTexture(targetColumn, targetRow, ground);
-  context.restore();
+function invalidateTransitionCorrectionCache(): void {
+  transitionCorrectionCacheReady = false;
+  transitionCorrectionBuildIndex = 0;
+  transitionCorrectionBuildScheduled = false;
+  transitionCorrectionContext.clearRect(0, 0, transitionCorrectionCanvas.width, transitionCorrectionCanvas.height);
+  transitionCorrectionPatchCanvas.width = CELL_SIZE;
+  transitionCorrectionPatchCanvas.height = CELL_SIZE;
+  transitionCorrectionMaskCanvas.width = CELL_SIZE;
+  transitionCorrectionMaskCanvas.height = CELL_SIZE;
+  transitionCorrectionBlurCanvas.width = CELL_SIZE;
+  transitionCorrectionBlurCanvas.height = CELL_SIZE;
+}
+function drawTransitionCorrectionToCache(
+  ground: GroundType,
+  targetColumn: number,
+  targetRow: number,
+  mask: number,
+): void {
+  const targetX = targetColumn * CELL_SIZE;
+  const targetY = targetRow * CELL_SIZE;
+  transitionCorrectionPatchContext.clearRect(0, 0, CELL_SIZE, CELL_SIZE);
+  drawGroundTextureTo(transitionCorrectionPatchContext, targetColumn, targetRow, ground, 0, 0);
+
+  transitionCorrectionMaskContext.clearRect(0, 0, CELL_SIZE, CELL_SIZE);
+  transitionCorrectionMaskContext.save();
+  transitionCorrectionMaskContext.translate(-targetX, -targetY);
+  transitionCorrectionMaskContext.fillStyle = "#fff";
+  transitionCorrectionMaskContext.fill(createTransitionCorrectionPath(targetColumn, targetRow, mask));
+  transitionCorrectionMaskContext.restore();
+
+  transitionCorrectionBlurContext.clearRect(0, 0, CELL_SIZE, CELL_SIZE);
+  transitionCorrectionBlurContext.save();
+  transitionCorrectionBlurContext.filter = `blur(${TRANSITION_CORRECTION_BLUR}px)`;
+  transitionCorrectionBlurContext.drawImage(transitionCorrectionMaskCanvas, 0, 0);
+  transitionCorrectionBlurContext.restore();
+
+  transitionCorrectionPatchContext.save();
+  transitionCorrectionPatchContext.globalCompositeOperation = "destination-in";
+  transitionCorrectionPatchContext.drawImage(transitionCorrectionBlurCanvas, 0, 0);
+  transitionCorrectionPatchContext.restore();
+
+  const diagonalMask = NEIGHBOR_MASK.NE | NEIGHBOR_MASK.SE | NEIGHBOR_MASK.SW | NEIGHBOR_MASK.NW;
+  const weight = mask & diagonalMask ? .78 : .92;
+  transitionCorrectionContext.save();
+  transitionCorrectionContext.globalAlpha = weight;
+  transitionCorrectionContext.drawImage(transitionCorrectionPatchCanvas, targetX, targetY);
+  transitionCorrectionContext.restore();
+}
+function scheduleTransitionCorrectionBuild(): void {
+  if (transitionCorrectionCacheReady || transitionCorrectionBuildScheduled) return;
+  transitionCorrectionBuildScheduled = true;
+  window.setTimeout(processTransitionCorrectionBuild, 0);
+}
+function processTransitionCorrectionBuild(): void {
+  transitionCorrectionBuildScheduled = false;
+  const startedAt = performance.now();
+  while (transitionCorrectionBuildIndex < map.cells.length && performance.now() - startedAt < 6) {
+    const index = transitionCorrectionBuildIndex;
+    const column = index % map.columns;
+    const row = Math.floor(index / map.columns);
+    for (const correction of getTransitionCorrections(map, column, row)) {
+      drawTransitionCorrectionToCache(correction.ground, correction.targetColumn, correction.targetRow, correction.mask);
+    }
+    transitionCorrectionBuildIndex += 1;
+  }
+  if (transitionCorrectionBuildIndex < map.cells.length) {
+    scheduleTransitionCorrectionBuild();
+    return;
+  }
+  transitionCorrectionCacheReady = true;
+  scheduleRender();
 }
 function drawGroundCorrections(): void {
+  if (!transitionCorrectionCacheReady) {
+    scheduleTransitionCorrectionBuild();
+  } else {
+    context.drawImage(transitionCorrectionCanvas, 0, 0);
+  }
   for (let row = 0; row < map.rows; row += 1) for (let column = 0; column < map.columns; column += 1) {
-    for (const correction of getTransitionCorrections(map, column, row)) {
-      drawGroundCorrection(correction.ground, correction.targetColumn, correction.targetRow, correction.mask);
-    }
     const ground = map.cells[cellIndex(map, column, row)].ground;
     const waterBankMask = getWaterBankMask(map, column, row);
     if (waterBankMask) drawWaterBank(column, row, ground, waterBankMask);
@@ -1515,17 +1607,31 @@ function drawImagePlacement(placement: MapImagePlacement, opacity = 1, selected 
 }
 function drawImagePlacementAnchors(): void {
   if (selectedLayer !== "image" || (imageMode !== "move" && imageMode !== "erase")) return;
+  const isEraseMode = imageMode === "erase";
+  const anchorDark = isEraseMode ? "rgba(100, 35, 24, .94)" : "rgba(72, 45, 10, .94)";
+  const anchorBright = isEraseMode ? "#ff8068" : "#ffc044";
+  const anchorFill = isEraseMode ? "rgba(221, 71, 48, .34)" : "rgba(247, 168, 25, .34)";
   context.save();
-  context.fillStyle = "rgba(42, 83, 59, .16)";
-  context.strokeStyle = "rgba(42, 83, 59, .46)";
-  context.lineWidth = 1.5;
   for (const placement of map.images) {
     const centerX = placement.column * CELL_SIZE + CELL_SIZE / 2;
     const centerY = placement.row * CELL_SIZE + CELL_SIZE / 2;
+    const radius = CELL_SIZE * .27;
     context.beginPath();
-    context.arc(centerX, centerY, CELL_SIZE * .22, 0, Math.PI * 2);
+    context.fillStyle = anchorFill;
+    context.strokeStyle = anchorDark;
+    context.lineWidth = 4;
+    context.arc(centerX, centerY, radius, 0, Math.PI * 2);
     context.fill();
     context.stroke();
+    context.beginPath();
+    context.strokeStyle = anchorBright;
+    context.lineWidth = 2;
+    context.arc(centerX, centerY, radius - 2, 0, Math.PI * 2);
+    context.stroke();
+    context.beginPath();
+    context.fillStyle = anchorBright;
+    context.arc(centerX, centerY, CELL_SIZE * .065, 0, Math.PI * 2);
+    context.fill();
   }
   context.restore();
 }
@@ -1935,6 +2041,7 @@ function paintAt(event: PointerEvent): void {
   if (!changed) return;
   if (!strokeChanged) { history.push(cloneMap(map)); if (history.length > 60) history.shift(); future = []; }
   if (selectedLayer === "ground") markBrightnessCorrectionChanges(map, candidate, groundCells);
+  if (selectedLayer === "ground") invalidateTransitionCorrectionCache();
   strokeChanged = true; map = candidate; render();
 }
 function finishStroke(): void {
@@ -1957,6 +2064,7 @@ function finishStroke(): void {
         if (history.length > 60) history.shift();
         future = [];
         strokeChanged = true;
+        invalidateTransitionCorrectionCache();
         markBrightnessCorrectionChanges(map, candidate, groundCells);
         map = candidate;
       }
@@ -2634,6 +2742,7 @@ function renderStandaloneImageLibraryPage(): void {
             <input id="image-upload-input" type="file" accept="image/jpeg,image/png,image/webp,image/gif" />
             <button class="button primary" type="button" id="upload-image">이미지 저장</button>
           </div>
+          <p class="image-upload-hint">2MB 이상 이미지는 저장 전에 리샘플링 여부를 확인합니다. PNG 투명도는 유지됩니다.</p>
           <p class="dialog-message" id="image-library-message"></p>
           <div id="image-library-list" class="image-library-list image-page-list"></div>
         </section>
@@ -2699,10 +2808,26 @@ async function uploadSelectedImage(): Promise<void> {
     setDialogMessage("#image-library-message", "첨부할 이미지를 선택해 주세요.", "error");
     return;
   }
+  const needsResample = isImageUploadOversized(file);
+  if (needsResample) {
+    const sizeInMegabytes = (file.size / (1024 * 1024)).toFixed(2);
+    const shouldResample = window.confirm(
+      `선택한 이미지가 ${sizeInMegabytes}MB입니다. 2MB 미만으로 줄이기 위해 브라우저에서 리샘플링할까요?\n\nPNG 투명 채널은 유지됩니다. 취소하면 업로드하지 않습니다.`,
+    );
+    if (!shouldResample) {
+      setDialogMessage("#image-library-message", "리샘플링하지 않아 이미지 저장을 취소했습니다.");
+      return;
+    }
+  }
   button.disabled = true;
-  setDialogMessage("#image-library-message", "이미지를 저장하는 중입니다.");
+  setDialogMessage(
+    "#image-library-message",
+    needsResample ? "브라우저에서 이미지 크기를 조정하는 중입니다." : "이미지를 저장하는 중입니다.",
+  );
   try {
-    await imageLibraryClient.uploadImage(authSession.token, file);
+    const uploadFile = needsResample ? await prepareImageForUpload(file) : file;
+    setDialogMessage("#image-library-message", "이미지를 저장하는 중입니다.");
+    await imageLibraryClient.uploadImage(authSession.token, uploadFile, file.name);
     const result = await imageLibraryClient.listImages(authSession.token);
     renderImageLibrary(result.images);
     input.value = "";

@@ -1,4 +1,9 @@
 export const IMAGE_MAX_BYTES = 10 * 1024 * 1024;
+export const IMAGE_UPLOAD_MAX_BYTES = 2 * 1024 * 1024;
+const IMAGE_RESAMPLE_TARGET_BYTES = 1_950_000;
+const IMAGE_RESAMPLE_MAX_DIMENSION = 4096;
+const IMAGE_RESAMPLE_DIMENSION_SCALES = [1, 0.85, 0.7, 0.55, 0.4, 0.3, 0.2] as const;
+const IMAGE_RESAMPLE_QUALITIES = [0.9, 0.8, 0.7, 0.6, 0.5, 0.4, 0.3] as const;
 
 export const IMAGE_MIME_TYPES = [
   "image/jpeg",
@@ -84,13 +89,13 @@ export class ImageLibraryClient {
     return parseImageListResponse(body);
   }
 
-  async uploadImage(token: string, file: File): Promise<ImageAsset> {
+  async uploadImage(token: string, file: File, originalFilename = file.name): Promise<ImageAsset> {
     validateToken(token);
     validateImageFile(file);
 
     const headers = this.authHeaders(token);
     headers["Content-Type"] = file.type;
-    headers["X-Original-Filename"] = encodeURIComponent(file.name);
+    headers["X-Original-Filename"] = encodeURIComponent(originalFilename);
     headers["Idempotency-Key"] = createIdempotencyKey();
 
     const body = await this.requestJson<unknown>("/images", {
@@ -170,16 +175,106 @@ export function parseImageAssetResponse(value: unknown): ImageAsset {
 }
 
 export function validateImageFile(file: File): void {
+  validateImageFileMetadata(file);
+
+  if (file.size > IMAGE_MAX_BYTES) {
+    throw new ImageLibraryError("이미지 파일은 10MB 이하만 업로드할 수 있습니다.", 413, "FILE_TOO_LARGE");
+  }
+}
+
+export function isImageUploadOversized(file: Pick<File, "size">): boolean {
+  return file.size >= IMAGE_UPLOAD_MAX_BYTES;
+}
+
+/**
+ * Prepare an oversized image in the browser after the user has opted in.
+ * PNG output is intentionally limited to alpha-safe formats so transparent
+ * pixels are not replaced with a solid JPEG background.
+ */
+export async function prepareImageForUpload(file: File): Promise<File> {
+  validateImageFileMetadata(file);
+  if (!isImageUploadOversized(file)) return file;
+
+  let decoded: DecodedImage;
+  try {
+    decoded = await decodeImage(file);
+  } catch {
+    throw new ImageLibraryError(
+      "이미지를 브라우저에서 읽지 못해 리샘플링할 수 없습니다.",
+      415,
+      "IMAGE_RESAMPLE_FAILED",
+    );
+  }
+
+  const canvas = document.createElement("canvas");
+  const context = canvas.getContext("2d");
+  if (!context) {
+    decoded.dispose();
+    throw new ImageLibraryError(
+      "이 브라우저에서는 이미지 리샘플링을 지원하지 않습니다.",
+      415,
+      "IMAGE_RESAMPLE_UNSUPPORTED",
+    );
+  }
+
+  const initialScale = Math.min(
+    1,
+    IMAGE_RESAMPLE_MAX_DIMENSION / decoded.width,
+    IMAGE_RESAMPLE_MAX_DIMENSION / decoded.height,
+  );
+  let smallestBlob: { blob: Blob; mimeType: ImageMimeType } | null = null;
+
+  try {
+    context.imageSmoothingEnabled = true;
+    context.imageSmoothingQuality = "high";
+
+    for (const dimensionScale of IMAGE_RESAMPLE_DIMENSION_SCALES) {
+      const width = Math.max(1, Math.round(decoded.width * initialScale * dimensionScale));
+      const height = Math.max(1, Math.round(decoded.height * initialScale * dimensionScale));
+      canvas.width = width;
+      canvas.height = height;
+      context.clearRect(0, 0, width, height);
+      context.drawImage(decoded.source, 0, 0, width, height);
+
+      for (const mimeType of getResampleMimeTypes(file.type as ImageMimeType)) {
+        const qualities = mimeType === "image/png" ? [undefined] : IMAGE_RESAMPLE_QUALITIES;
+        for (const quality of qualities) {
+          const blob = await canvasToBlob(canvas, mimeType, quality);
+          if (!blob || blob.size <= 0) continue;
+
+          if (!smallestBlob || blob.size < smallestBlob.blob.size) {
+            smallestBlob = { blob, mimeType };
+          }
+          if (blob.size <= IMAGE_RESAMPLE_TARGET_BYTES) {
+            return createResampledFile(blob, mimeType, file.name);
+          }
+          if (blob.size < IMAGE_UPLOAD_MAX_BYTES) {
+            return createResampledFile(blob, mimeType, file.name);
+          }
+        }
+      }
+    }
+  } finally {
+    decoded.dispose();
+  }
+
+  if (smallestBlob && smallestBlob.blob.size < IMAGE_UPLOAD_MAX_BYTES) {
+    return createResampledFile(smallestBlob.blob, smallestBlob.mimeType, file.name);
+  }
+  throw new ImageLibraryError(
+    "이미지를 2MB 미만으로 줄이지 못했습니다. 이미지 크기나 해상도를 낮춘 뒤 다시 시도해 주세요.",
+    413,
+    "FILE_TOO_LARGE",
+  );
+}
+
+function validateImageFileMetadata(file: File): void {
   if (!file || typeof file !== "object") {
     throw new ImageLibraryError("이미지 파일을 선택해 주세요.", 400, "INVALID_FILE");
   }
 
   if (!Number.isFinite(file.size) || file.size <= 0) {
     throw new ImageLibraryError("빈 이미지 파일은 업로드할 수 없습니다.", 400, "INVALID_FILE");
-  }
-
-  if (file.size > IMAGE_MAX_BYTES) {
-    throw new ImageLibraryError("이미지 파일은 10MB 이하만 업로드할 수 있습니다.", 413, "FILE_TOO_LARGE");
   }
 
   if (!isImageMimeType(file.type)) {
@@ -193,6 +288,73 @@ export function validateImageFile(file: File): void {
   if (typeof file.name !== "string" || file.name.trim() === "") {
     throw new ImageLibraryError("이미지 파일 이름을 확인해 주세요.", 400, "INVALID_FILE");
   }
+}
+
+interface DecodedImage {
+  source: CanvasImageSource;
+  width: number;
+  height: number;
+  dispose: () => void;
+}
+
+async function decodeImage(file: File): Promise<DecodedImage> {
+  if (typeof globalThis.createImageBitmap === "function") {
+    const bitmap = await globalThis.createImageBitmap(file);
+    return {
+      source: bitmap,
+      width: bitmap.width,
+      height: bitmap.height,
+      dispose: () => bitmap.close(),
+    };
+  }
+
+  const objectUrl = URL.createObjectURL(file);
+  try {
+    const image = await new Promise<HTMLImageElement>((resolve, reject) => {
+      const element = new Image();
+      element.onload = () => resolve(element);
+      element.onerror = () => reject(new Error("Image decoding failed"));
+      element.src = objectUrl;
+    });
+    return {
+      source: image,
+      width: image.naturalWidth || image.width,
+      height: image.naturalHeight || image.height,
+      dispose: () => URL.revokeObjectURL(objectUrl),
+    };
+  } catch (error) {
+    URL.revokeObjectURL(objectUrl);
+    throw error;
+  }
+}
+
+function canvasToBlob(
+  canvas: HTMLCanvasElement,
+  mimeType: ImageMimeType,
+  quality?: number,
+): Promise<Blob | null> {
+  return new Promise((resolve) => {
+    canvas.toBlob(resolve, mimeType, quality);
+  });
+}
+
+function getResampleMimeTypes(sourceMimeType: ImageMimeType): readonly ImageMimeType[] {
+  if (sourceMimeType === "image/png" || sourceMimeType === "image/gif") {
+    return ["image/webp", "image/png"];
+  }
+  if (sourceMimeType === "image/jpeg") {
+    return ["image/jpeg", "image/webp"];
+  }
+  return ["image/webp", "image/jpeg"];
+}
+
+function createResampledFile(blob: Blob, mimeType: ImageMimeType, originalName: string): File {
+  const extension = mimeType === "image/jpeg" ? "jpg" : mimeType.slice("image/".length);
+  const baseName = originalName.replace(/\.[^./\\]*$/u, "") || "image";
+  return new File([blob], `${baseName}.${extension}`, {
+    type: mimeType,
+    lastModified: Date.now(),
+  });
 }
 
 export function isImageMimeType(value: unknown): value is ImageMimeType {

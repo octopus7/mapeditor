@@ -1,10 +1,13 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import {
   IMAGE_MAX_BYTES,
+  IMAGE_UPLOAD_MAX_BYTES,
   ImageLibraryClient,
   ImageLibraryError,
+  isImageUploadOversized,
   parseImageAssetResponse,
   parseImageListResponse,
+  prepareImageForUpload,
 } from "../src/image-library";
 
 afterEach(() => {
@@ -101,6 +104,21 @@ describe("ImageLibraryClient", () => {
     expect(headers.get("Idempotency-Key")).toBe("upload-key-1");
   });
 
+  it("keeps the source filename when a resampled file is uploaded", async () => {
+    const fetchMock = vi.fn().mockResolvedValue(jsonResponse({ image: sampleAsset }));
+    vi.stubGlobal("fetch", fetchMock);
+    vi.stubGlobal("crypto", { randomUUID: vi.fn().mockReturnValue("upload-key-2") });
+    const file = makeFile("원본 투명 이미지.png", "image/webp");
+    const resampledFile = makeFile("원본 투명 이미지.webp", "image/webp");
+
+    await new ImageLibraryClient("https://api.example.com")
+      .uploadImage("session-token", resampledFile, file.name);
+
+    const [, init] = fetchMock.mock.calls[0] as [string, RequestInit];
+    expect(new Headers(init.headers).get("X-Original-Filename"))
+      .toBe(encodeURIComponent(file.name));
+  });
+
   it("rejects an unsupported file before making a request", async () => {
     const fetchMock = vi.fn();
     vi.stubGlobal("fetch", fetchMock);
@@ -191,6 +209,18 @@ describe("ImageLibraryClient", () => {
         code: "AUTH_REQUIRED",
       });
     expect(fetchMock).not.toHaveBeenCalled();
+  });
+});
+
+describe("browser image upload preparation", () => {
+  it("uses a strict under-2MB threshold", () => {
+    expect(isImageUploadOversized({ size: IMAGE_UPLOAD_MAX_BYTES - 1 })).toBe(false);
+    expect(isImageUploadOversized({ size: IMAGE_UPLOAD_MAX_BYTES })).toBe(true);
+  });
+
+  it("does not alter images that are already below the browser limit", async () => {
+    const file = makeFile("small.png", "image/png", IMAGE_UPLOAD_MAX_BYTES - 1);
+    await expect(prepareImageForUpload(file)).resolves.toBe(file);
   });
 });
 
