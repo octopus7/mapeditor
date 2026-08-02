@@ -434,3 +434,9 @@
 - Treated water as a lower special ground and added a normalized water-edge mask for non-water cells.
 - Rendered direction-aware ground side faces with material shading and a darker water-facing edge so grass, dirt, and stone show a small step down into the water.
 - Verified the result in the local canvas preview, passed all static checks with 44 tests, deployed Worker version `5f118a0b-1b97-4c15-af66-7a85ad019238` and Pages preview `https://b144515d.mapedit.pages.dev`, then verified the production health endpoint and bundle.
+
+## Add in-page image viewer overlay 2026-08-02 22:10:00 ~ 2026-08-02 22:13:53 (3분53초)
+
+- Limited the image-view action to the actual thumbnail while keeping the surrounding gray preview area and caption as card selection space.
+- Added an in-page original-image overlay that closes when the image or backdrop is clicked again.
+- Added a `새창으로 보기` action that opens the original in a new tab and closes the overlay, then passed checks, deployed Pages, and verified the live viewer controls.
