@@ -377,3 +377,9 @@
 - Reviewed the Worker route and confirmed both `GET /images` and `POST /images` call `requireProfile()` before accessing image data or the upload service.
 - Verified the deployed Worker with unauthenticated requests; both image endpoints returned HTTP 401.
 - Confirmed the public `meme.devtuna.win/i/<hash>.<extension>` URL is separate from the mapeditor API and remains intentionally public for rendering stored images; no code change or redeployment was necessary.
+
+## Fix blocked meme thumbnail loading 2026-08-02 21:39:24 ~ 2026-08-02 21:43:16 (3분 52초)
+
+- Confirmed the frontend already renders the stored `thumbnailUrl` as `img.src` and the production D1 row already points to the correct `/t/<hash>` URL.
+- Verified the meme thumbnail endpoint returned HTTP 200 with `image/webp`; identified the actual cause as Pages CSP `img-src` excluding `https://meme.devtuna.win`.
+- Added the meme image origin to the Pages CSP, passed all static checks (39 tests), redeployed Pages, and verified the live CSP and thumbnail response.
