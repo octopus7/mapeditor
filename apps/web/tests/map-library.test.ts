@@ -6,11 +6,11 @@ function createSmallMap(): MapDocument {
   const map = createInitialMap();
   map.columns = 8;
   map.rows = 8;
-  map.cells = Array.from({ length: 64 }, () => ({ ground: "grass" as const, prop: null }));
-  map.cells[0] = { ground: "water", prop: "boulder" };
-  map.cells[7] = { ground: "stone", prop: "pine-tree" };
-  map.cells[56] = { ground: "dirt", prop: "shrub" };
-  map.cells[63] = { ground: "water", prop: "footbridge" };
+  map.cells = Array.from({ length: 64 }, () => ({ ground: "grass" as const, elevation: 0 as const, prop: null }));
+  map.cells[0] = { ground: "water", elevation: 0, prop: "boulder" };
+  map.cells[7] = { ground: "stone", elevation: 0, prop: "pine-tree" };
+  map.cells[56] = { ground: "dirt", elevation: 0, prop: "shrub" };
+  map.cells[63] = { ground: "water", elevation: 0, prop: "footbridge" };
   map.images = [
     { imageId: "asset-1", column: 2, row: 3, rotation: 90, scale: 2 },
     { imageId: "asset-2", column: 7, row: 7, rotation: 0, scale: 1 },
@@ -25,23 +25,23 @@ describe("resizeMap", () => {
 
     expect(resized.columns).toBe(10);
     expect(resized.rows).toBe(9);
-    expect(resized.cells[0]).toEqual({ ground: "water", prop: "boulder" });
-    expect(resized.cells[7]).toEqual({ ground: "stone", prop: "pine-tree" });
-    expect(resized.cells[8]).toEqual({ ground: "grass", prop: null });
-    expect(resized.cells[7 * 10]).toEqual({ ground: "dirt", prop: "shrub" });
-    expect(resized.cells[7 * 10 + 7]).toEqual({ ground: "water", prop: "footbridge" });
+    expect(resized.cells[0]).toEqual({ ground: "water", elevation: 0, prop: "boulder" });
+    expect(resized.cells[7]).toEqual({ ground: "stone", elevation: 0, prop: "pine-tree" });
+    expect(resized.cells[8]).toEqual({ ground: "grass", elevation: 0, prop: null });
+    expect(resized.cells[7 * 10]).toEqual({ ground: "dirt", elevation: 0, prop: "shrub" });
+    expect(resized.cells[7 * 10 + 7]).toEqual({ ground: "water", elevation: 0, prop: "footbridge" });
     expect(original.columns).toBe(8);
-    expect(original.cells[0]).toEqual({ ground: "water", prop: "boulder" });
+    expect(original.cells[0]).toEqual({ ground: "water", elevation: 0, prop: "boulder" });
   });
 
   it("keeps the existing map centered when expanding", () => {
     const original = createSmallMap();
     const resized = resizeMap(original, 10, 10, "center");
 
-    expect(resized.cells[1 * 10 + 1]).toEqual({ ground: "water", prop: "boulder" });
-    expect(resized.cells[1 * 10 + 8]).toEqual({ ground: "stone", prop: "pine-tree" });
-    expect(resized.cells[8 * 10 + 1]).toEqual({ ground: "dirt", prop: "shrub" });
-    expect(resized.cells[8 * 10 + 8]).toEqual({ ground: "water", prop: "footbridge" });
+    expect(resized.cells[1 * 10 + 1]).toEqual({ ground: "water", elevation: 0, prop: "boulder" });
+    expect(resized.cells[1 * 10 + 8]).toEqual({ ground: "stone", elevation: 0, prop: "pine-tree" });
+    expect(resized.cells[8 * 10 + 1]).toEqual({ ground: "dirt", elevation: 0, prop: "shrub" });
+    expect(resized.cells[8 * 10 + 8]).toEqual({ ground: "water", elevation: 0, prop: "footbridge" });
     expect(resized.images).toEqual([
       { imageId: "asset-1", column: 3, row: 4, rotation: 90, scale: 2 },
       { imageId: "asset-2", column: 8, row: 8, rotation: 0, scale: 1 },

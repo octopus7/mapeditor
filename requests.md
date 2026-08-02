@@ -452,3 +452,9 @@
 - Replaced the bright green/stone-like water bank gradient with dark brown soil palettes, especially for grass edges.
 - Increased the bank face thickness to cover the full water transition edge and retained a subtle darker outer edge.
 - Passed all static checks with 44 tests, deployed Pages, and verified the live map canvas.
+
+## Add tile elevation layer 2026-08-02 22:32:09 ~ 2026-08-02 22:47:54 (15분 45초)
+
+- Added a tile-internal `지형`/`레이어` sub-tab with `기본 높이` and `1층 올리기` controls.
+- Added persisted per-cell elevation values limited to 0 or 1; water cells cannot be raised and legacy maps default missing values to 0.
+- Rendered one-tile-high exposed side faces for raised non-water tiles, passed 45 tests and the production build, deployed Pages preview `https://44e349eb.mapedit.pages.dev`, and verified the live controls.

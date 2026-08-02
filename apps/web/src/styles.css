@@ -59,6 +59,9 @@ button:focus-visible, input:focus-visible, canvas:focus-visible { outline: 3px s
 .panel-heading h2 { margin: 4px 0 0; color: #23372a; font-family: "Malgun Gothic", sans-serif; font-size: 20px; font-weight: 400; }
 .panel-heading p { margin: 9px 0 0; color: #7d857f; font-size: 11px; line-height: 1.55; }
 .layer-tabs { display: grid; grid-template-columns: repeat(3, 1fr); margin: 21px 0 18px; padding: 3px; border-radius: 9px; background: #e8e9df; }
+.ground-edit-tabs { display: grid; grid-template-columns: repeat(2, 1fr); gap: 3px; margin: -3px 0 15px; padding: 3px; border-radius: 8px; background: #eef0e8; }
+.ground-edit-tab { min-height: 29px; padding: 0 4px; border: 0; border-radius: 6px; color: #7d887f; background: transparent; cursor: pointer; font-size: 10px; font-weight: 600; }
+.ground-edit-tab:hover { color: #38533f; }.ground-edit-tab.active { color: #294434; background: #fff; box-shadow: 0 2px 7px rgba(43, 59, 46, .1); }
 .layer-tab { padding: 8px; border: 0; border-radius: 7px; color: #7d887f; background: transparent; cursor: pointer; font-size: 11px; font-weight: 600; }
 .layer-tab.active { color: #294434; background: #fff; box-shadow: 0 2px 8px rgba(43, 59, 46, .08); }
 .section-label { display: flex; justify-content: space-between; margin-bottom: 9px; color: #929b94; font-size: 9px; font-weight: 700; letter-spacing: .13em; }
@@ -72,6 +75,13 @@ button:focus-visible, input:focus-visible, canvas:focus-visible { outline: 3px s
 .ground-option .check { display: none; width: 17px; height: 17px; border-radius: 50%; color: #fff; background: #456b4b; text-align: center; font-size: 10px; line-height: 17px; }
 .ground-option.selected .check { display: block; }
 .ground-swatch { position: relative; width: 37px; height: 37px; overflow: hidden; border: 1px solid rgba(44, 65, 48, .18); border-radius: 7px; box-shadow: inset 0 0 9px rgba(255,255,255,.2); }
+.tile-elevation-list { display: grid; gap: 7px; }
+.tile-elevation-option { width: 100%; display: grid; grid-template-columns: 37px 1fr; gap: 10px; align-items: center; padding: 8px; border: 1px solid transparent; border-radius: 9px; background: transparent; text-align: left; cursor: pointer; }
+.tile-elevation-option:hover { background: #f0f1e9; }.tile-elevation-option.selected { border-color: #9eae9d; background: #edf1e8; }
+.tile-elevation-option strong, .tile-elevation-option small { display: block; }.tile-elevation-option strong { font-size: 12px; }.tile-elevation-option small { margin-top: 2px; color: #949b95; font-size: 9px; }
+.tile-elevation-icon { position: relative; width: 37px; height: 37px; border: 1px solid rgba(44, 65, 48, .18); border-radius: 7px; background: #6a9655; box-shadow: inset 0 0 9px rgba(255,255,255,.2); }
+.tile-elevation-icon::after { content: ""; position: absolute; right: -5px; bottom: -5px; width: 100%; height: 5px; border-radius: 0 0 3px 0; background: #4a321f; }.tile-elevation-icon::before { content: ""; position: absolute; top: 0; right: -5px; width: 5px; height: 100%; border-radius: 0 3px 0 0; background: #3f2c1e; }
+.tile-elevation-icon.base::before, .tile-elevation-icon.base::after { display: none; }.tile-elevation-hint { margin: 13px 2px 0; color: #8b948d; font-size: 9px; line-height: 1.5; }
 .ground-swatch::after { content: ""; position: absolute; inset: 0; opacity: .24; background-image: radial-gradient(circle at 28% 30%, #fff 0 1px, transparent 1.5px), radial-gradient(circle at 70% 68%, #182e20 0 1px, transparent 1.5px); background-size: 13px 11px; }
 .ground-swatch.grass { background: #6a9655; }.ground-swatch.dirt { background: #a77d4c; }.ground-swatch.stone { background: #82877c; }.ground-swatch.water { background: #3d8b9b; }
 .prop-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 7px; }

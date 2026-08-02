@@ -1,8 +1,8 @@
 import "./styles.css";
 import {
   cellIndex, cloneMap, createInitialMap, deserializeMap, IMAGE_MAX_SCALE, IMAGE_MIN_SCALE, moveImage,
-  moveProp, paintGround, placeImage, placeProp, removeImage, serializeMap, updateImageTransform,
-  type GroundType, type MapDocument, type MapImagePlacement, type PropType,
+  moveProp, paintGround, placeImage, placeProp, removeImage, serializeMap, setTileElevation, updateImageTransform,
+  type GroundType, type MapDocument, type MapImagePlacement, type PropType, type TileElevation,
 } from "./editor-model";
 import { getBridgeConnectionShape, getBridgeTextureRotation, getPropNeighborMask, getTransitionLayers, getWaterBankMask, NEIGHBOR_MASK } from "./autotile";
 import {
@@ -44,6 +44,7 @@ const propOptions: Array<{ id: PropType; label: string; image: string }> = [
   { id: "footbridge", label: "나무다리", image: "/assets/props/footbridge.png" },
 ];
 type Layer = "ground" | "prop" | "image";
+type GroundEditTab = "terrain" | "elevation";
 type PropMode = "place" | "move" | "erase";
 type CellPosition = { column: number; row: number };
 type MovingProp = {
@@ -61,7 +62,9 @@ type MovingImage = {
 
 let map = restoreDraft() ?? createInitialMap();
 let savedMapId: string | null = null;
+let selectedGroundEditTab: GroundEditTab = "terrain";
 let selectedLayer: Layer = "ground";
+let selectedTileElevation: TileElevation = 1;
 let selectedGround: GroundType = "grass";
 let selectedProp: PropType = "broadleaf-tree";
 let gridVisible = true;
@@ -150,6 +153,11 @@ document.querySelector<HTMLDivElement>("#app")!.innerHTML = `
         <div class="layer-tabs" role="tablist" aria-label="편집 레이어">
           <button class="layer-tab active" data-layer="ground">타일</button>
           <button class="layer-tab" data-layer="prop">사물</button>
+          <div class="ground-edit-tabs" role="tablist" aria-label="타일 편집 종류">
+            <button class="ground-edit-tab active" type="button" data-ground-edit-tab="terrain" role="tab" aria-selected="true">지형</button>
+            <button class="ground-edit-tab" type="button" data-ground-edit-tab="elevation" role="tab" aria-selected="false">레이어</button>
+          </div>
+          <section id="terrain-palette">
           <button class="layer-tab" data-layer="image">이미지</button>
         </div>
         <section class="palette-section" id="ground-palette">
@@ -158,6 +166,21 @@ document.querySelector<HTMLDivElement>("#app")!.innerHTML = `
             ${groundOptions.map((item, index) => `
               <button class="ground-option ${index === 0 ? "selected" : ""}" data-ground="${item.id}">
                 <span class="ground-swatch ${item.id}"></span>
+          </section>
+          <section class="hidden" id="elevation-palette">
+            <div class="section-label"><span>TILE HEIGHT</span><span>1 TILE</span></div>
+            <div class="tile-elevation-list" role="radiogroup" aria-label="타일 높이">
+              <button class="tile-elevation-option" type="button" data-tile-elevation="0" role="radio" aria-checked="false">
+                <span class="tile-elevation-icon base" aria-hidden="true"></span>
+                <span><strong>기본 높이</strong><small>현재 층으로 내리기</small></span>
+              </button>
+              <button class="tile-elevation-option selected" type="button" data-tile-elevation="1" role="radio" aria-checked="true">
+                <span class="tile-elevation-icon raised" aria-hidden="true"></span>
+                <span><strong>1층 올리기</strong><small>타일 한 칸 높이 올리기</small></span>
+              </button>
+            </div>
+            <p class="tile-elevation-hint">물 타일은 올릴 수 없습니다. 비물 타일을 드래그해 높이를 칠하세요.</p>
+          </section>
                 <span><strong>${item.label}</strong><small>${item.hint}</small></span><span class="check">✓</span>
               </button>`).join("")}
           </div>
@@ -466,6 +489,45 @@ function drawWaterBankFace(column: number, row: number, ground: GroundType, dire
   context.strokeStyle = dark;
   context.lineWidth = 1;
   context.beginPath();
+const raisedTileSidePalettes: Record<GroundType, [number, number, number]> = {
+  grass: [74, 50, 30], dirt: [91, 58, 34], stone: [73, 74, 66], water: [35, 84, 91],
+};
+function drawRaisedTileFace(column: number, row: number, ground: GroundType, direction: "E" | "S"): void {
+  const x = column * CELL_SIZE;
+  const y = row * CELL_SIZE;
+  const [r, g, b] = raisedTileSidePalettes[ground];
+  const shadow = `rgb(${Math.round(r * .72)}, ${Math.round(g * .72)}, ${Math.round(b * .72)})`;
+  const dark = `rgb(${Math.round(r * .46)}, ${Math.round(g * .46)}, ${Math.round(b * .46)})`;
+  const gradient = direction === "S"
+    ? context.createLinearGradient(0, y + CELL_SIZE, 0, y + CELL_SIZE + CELL_SIZE)
+    : context.createLinearGradient(x + CELL_SIZE, 0, x + CELL_SIZE + CELL_SIZE, 0);
+  gradient.addColorStop(0, shadow);
+  gradient.addColorStop(.72, shadow);
+  gradient.addColorStop(1, dark);
+  context.save();
+  context.fillStyle = gradient;
+  if (direction === "S") context.fillRect(x, y + CELL_SIZE, CELL_SIZE, CELL_SIZE);
+  else context.fillRect(x + CELL_SIZE, y, CELL_SIZE, CELL_SIZE);
+  context.globalAlpha = .52;
+  context.strokeStyle = dark;
+  context.lineWidth = 1;
+  context.beginPath();
+  if (direction === "S") {
+    context.moveTo(x, y + CELL_SIZE + 1); context.lineTo(x + CELL_SIZE, y + CELL_SIZE + 1);
+  } else {
+    context.moveTo(x + CELL_SIZE + 1, y); context.lineTo(x + CELL_SIZE + 1, y + CELL_SIZE);
+  }
+  context.stroke();
+  context.restore();
+}
+function drawRaisedTile(column: number, row: number, ground: GroundType): void {
+  const current = map.cells[cellIndex(map, column, row)];
+  if (current.elevation !== 1 || ground === "water") return;
+  const south = row + 1 < map.rows ? map.cells[cellIndex(map, column, row + 1)] : null;
+  const east = column + 1 < map.columns ? map.cells[cellIndex(map, column + 1, row)] : null;
+  if (!south || south.elevation < current.elevation) drawRaisedTileFace(column, row, ground, "S");
+  if (!east || east.elevation < current.elevation) drawRaisedTileFace(column, row, ground, "E");
+}
   if (direction === "N" || direction === "S") {
     const lineY = direction === "N" ? y + 1 : y + CELL_SIZE - 1;
     context.moveTo(x, lineY); context.lineTo(x + CELL_SIZE, lineY);
@@ -575,6 +637,9 @@ function drawImagePlacement(placement: MapImagePlacement, opacity = 1, selected 
   const centerX = placement.column * CELL_SIZE + CELL_SIZE / 2;
   const centerY = placement.row * CELL_SIZE + CELL_SIZE / 2;
   context.save();
+  for (let row = 0; row < map.rows; row += 1) for (let column = 0; column < map.columns; column += 1) {
+    drawRaisedTile(column, row, map.cells[cellIndex(map, column, row)].ground);
+  }
   context.globalAlpha = opacity;
   context.translate(centerX, centerY);
   context.rotate(placement.rotation * Math.PI / 180);
@@ -674,7 +739,11 @@ function panAt(event: PointerEvent): void {
 function getCell(event: PointerEvent): CellPosition | null {
   const rect = canvas.getBoundingClientRect();
   if (event.clientX < rect.left || event.clientX >= rect.right || event.clientY < rect.top || event.clientY >= rect.bottom) return null;
-  return { column: Math.floor(((event.clientX - rect.left) / rect.width) * map.columns), row: Math.floor(((event.clientY - rect.top) / rect.height) * map.rows) };
+  const scaleX = rect.width / canvas.width;
+  const scaleY = rect.height / canvas.height;
+  const column = Math.floor((event.clientX - rect.left) / scaleX / CELL_SIZE);
+  const row = Math.floor((event.clientY - rect.top) / scaleY / CELL_SIZE);
+  return column >= 0 && row >= 0 && column < map.columns && row < map.rows ? { column, row } : null;
 }
 function getTopImageIndex(column: number, row: number): number {
   for (let index = map.images.length - 1; index >= 0; index -= 1) {
@@ -742,7 +811,11 @@ function paintAt(event: PointerEvent): void {
     return;
   }
   const candidate = cloneMap(map);
-  const changed = selectedLayer === "ground" ? paintGround(candidate, column, row, erase ? "grass" : selectedGround) : placeProp(candidate, column, row, erase ? null : selectedProp);
+  const changed = selectedLayer === "ground"
+    ? selectedGroundEditTab === "elevation"
+      ? setTileElevation(candidate, column, row, erase ? 0 : selectedTileElevation)
+      : paintGround(candidate, column, row, erase ? "grass" : selectedGround)
+    : placeProp(candidate, column, row, erase ? null : selectedProp);
   if (!changed) return;
   if (!strokeChanged) { history.push(cloneMap(map)); if (history.length > 60) history.shift(); future = []; }
   strokeChanged = true; map = candidate; render();
@@ -1761,6 +1834,24 @@ async function initializeDeveloperAccess(apiBaseUrl: string): Promise<void> {
     target.classList.add("is-unavailable");
     target.classList.remove("is-link");
     target.disabled = true;
+function setGroundEditTab(tab: GroundEditTab): void {
+  selectedGroundEditTab = tab;
+  document.querySelectorAll<HTMLButtonElement>("[data-ground-edit-tab]").forEach((button) => {
+    const active = button.dataset.groundEditTab === tab;
+    button.classList.toggle("active", active);
+    button.setAttribute("aria-selected", String(active));
+  });
+  document.querySelector("#terrain-palette")?.classList.toggle("hidden", tab !== "terrain");
+  document.querySelector("#elevation-palette")?.classList.toggle("hidden", tab !== "elevation");
+}
+function setTileElevationOption(elevation: TileElevation): void {
+  selectedTileElevation = elevation;
+  document.querySelectorAll<HTMLButtonElement>("[data-tile-elevation]").forEach((button) => {
+    const active = Number(button.dataset.tileElevation) === elevation;
+    button.classList.toggle("selected", active);
+    button.setAttribute("aria-checked", String(active));
+  });
+}
     target.title = "The Worker health check could not be completed.";
   }
 }
@@ -1877,6 +1968,12 @@ canvas.addEventListener("pointercancel", (event) => {
   if (canvas.hasPointerCapture(event.pointerId)) canvas.releasePointerCapture(event.pointerId);
 });
 canvas.addEventListener("contextmenu", (event) => event.preventDefault());
+document.querySelectorAll<HTMLButtonElement>("[data-ground-edit-tab]").forEach((button) => button.addEventListener("click", () => {
+  setGroundEditTab(button.dataset.groundEditTab as GroundEditTab);
+}));
+document.querySelectorAll<HTMLButtonElement>("[data-tile-elevation]").forEach((button) => button.addEventListener("click", () => {
+  setTileElevationOption(Number(button.dataset.tileElevation) as TileElevation);
+}));
 canvas.addEventListener("pointerleave", () => { document.querySelector("#cursor-status")!.textContent = "셀 위에 커서를 올려보세요"; });
 canvasScroll.addEventListener("wheel", (event) => {
   if (event.deltaY === 0) return;
@@ -1950,7 +2047,7 @@ document.querySelector("#toggle-pan")!.addEventListener("click", () => {
 });
 document.querySelector("#reset-map")!.addEventListener("click", () => { savedMapId = null; replaceMap(createInitialMap()); });
 document.querySelector("#clear-map")!.addEventListener("click", () => {
-  const next = createInitialMap(); next.name = "새로운 숲"; next.cells = next.cells.map(() => ({ ground: "grass", prop: null })); savedMapId = null; replaceMap(next);
+  const next = createInitialMap(); next.name = "새로운 숲"; next.cells = next.cells.map(() => ({ ground: "grass", elevation: 0, prop: null })); savedMapId = null; replaceMap(next);
 });
 document.querySelector("#export-json")!.addEventListener("click", () => {
   setFileMenuOpen(false);

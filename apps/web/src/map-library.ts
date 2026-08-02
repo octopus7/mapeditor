@@ -187,7 +187,7 @@ export function resizeMap(
   }
 
   const offsets = getResizeOffsets(map.columns, map.rows, columns, rows, anchor);
-  const cells: MapCell[] = Array.from({ length: columns * rows }, () => ({ ground: "grass", prop: null }));
+  const cells: MapCell[] = Array.from({ length: columns * rows }, () => ({ ground: "grass", elevation: 0, prop: null }));
 
   for (let row = 0; row < map.rows; row += 1) {
     for (let column = 0; column < map.columns; column += 1) {

@@ -11,6 +11,7 @@ import {
   placeImage,
   placeProp,
   removeImage,
+  setTileElevation,
   serializeMap,
   updateImageTransform,
 } from "../src/editor-model";
@@ -31,6 +32,17 @@ describe("editor model", () => {
     expect(placeProp(map, 0, 0, "shrub")).toBe(true);
     expect(paintGround(map, -1, 0, "water")).toBe(false);
     expect(placeProp(map, map.columns, 0, "boulder")).toBe(false);
+  });
+
+  it("raises non-water tiles by one level and keeps water at the base level", () => {
+    const map = createInitialMap();
+    expect(setTileElevation(map, 0, 0, 1)).toBe(true);
+    expect(map.cells[0].elevation).toBe(1);
+    expect(setTileElevation(map, 0, 0, 1)).toBe(false);
+
+    expect(paintGround(map, 0, 0, "water")).toBe(true);
+    expect(map.cells[0].elevation).toBe(0);
+    expect(setTileElevation(map, 0, 0, 1)).toBe(false);
   });
 
   it("moves a prop to another cell and overwrites the destination prop", () => {

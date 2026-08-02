@@ -4,6 +4,9 @@ export const GRID_ROWS = 18;
 export const groundTypes = ["grass", "dirt", "stone", "water"] as const;
 export type GroundType = (typeof groundTypes)[number];
 
+export const tileElevations = [0, 1] as const;
+export type TileElevation = (typeof tileElevations)[number];
+
 export const propTypes = [
   "broadleaf-tree",
   "pine-tree",
@@ -16,6 +19,7 @@ export type PropType = (typeof propTypes)[number];
 
 export interface MapCell {
   ground: GroundType;
+  elevation: TileElevation;
   prop: PropType | null;
 }
 
@@ -64,8 +68,24 @@ export function paintGround(
 ): boolean {
   if (!isInside(map, column, row)) return false;
   const cell = map.cells[cellIndex(map, column, row)];
-  if (cell.ground === ground) return false;
+  if (cell.ground === ground && (ground !== "water" || cell.elevation === 0)) return false;
   cell.ground = ground;
+  if (ground === "water") cell.elevation = 0;
+  map.updatedAt = new Date().toISOString();
+  return true;
+}
+
+export function setTileElevation(
+  map: MapDocument,
+  column: number,
+  row: number,
+  elevation: TileElevation,
+): boolean {
+  if (!isInside(map, column, row)) return false;
+  if (!tileElevations.includes(elevation)) return false;
+  const cell = map.cells[cellIndex(map, column, row)];
+  if (cell.ground === "water" || cell.elevation === elevation) return false;
+  cell.elevation = elevation;
   map.updatedAt = new Date().toISOString();
   return true;
 }
@@ -167,7 +187,7 @@ export function moveProp(
 export function clearGround(map: MapDocument): MapDocument {
   return {
     ...map,
-    cells: map.cells.map(() => ({ ground: "grass", prop: null })),
+    cells: map.cells.map(() => ({ ground: "grass", elevation: 0, prop: null })),
     updatedAt: new Date().toISOString(),
   };
 }
@@ -180,6 +200,7 @@ export function createInitialMap(): MapDocument {
     rows: GRID_ROWS,
     cells: Array.from({ length: GRID_COLUMNS * GRID_ROWS }, () => ({
       ground: "grass" as GroundType,
+      elevation: 0 as TileElevation,
       prop: null,
     })),
     images: [],
@@ -262,7 +283,13 @@ export function deserializeMap(value: string): MapDocument | null {
       const cell = rawCell as Partial<MapCell>;
       if (!groundTypes.includes(cell.ground as GroundType)) return null;
       if (cell.prop !== null && !propTypes.includes(cell.prop as PropType)) return null;
-      cells.push({ ground: cell.ground as GroundType, prop: cell.prop as PropType | null });
+      const elevation = cell.elevation === undefined ? 0 : cell.elevation;
+      if (!tileElevations.includes(elevation as TileElevation) || !Number.isInteger(elevation)) return null;
+      cells.push({
+        ground: cell.ground as GroundType,
+        elevation: cell.ground === "water" ? 0 : elevation as TileElevation,
+        prop: cell.prop as PropType | null,
+      });
     }
 
     const images: MapImagePlacement[] = [];
