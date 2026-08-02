@@ -403,3 +403,9 @@
 - Replaced the image-library modal flow with a dedicated `/images/` page while preserving authenticated listing, upload, and developer error diagnostics.
 - Added a spacious responsive image grid, page navigation back to the editor, file upload controls, image count, and login-required handling.
 - Verified the standalone page locally and in the deployed Pages bundle; removed the obsolete modal-only style and verified the new hashed bundle after a cache-busting refresh.
+
+## Open originals and select image cards 2026-08-02 21:50:02 ~ 2026-08-02 21:54:54 (4분52초)
+
+- Made each thumbnail link open the original image URL in a new tab.
+- Added radio-style single selection for the outer image card, including selected color, focus styling, and Enter/Space keyboard support.
+- Confirmed selecting another card clears the previous selection, passed static checks, and deployed the updated Pages bundle.
