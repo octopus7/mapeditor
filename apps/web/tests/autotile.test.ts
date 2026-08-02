@@ -2,6 +2,8 @@ import { describe, expect, it } from "vitest";
 import {
   GROUND_PRIORITY,
   NEIGHBOR_MASK,
+  getBridgeConnectionShape,
+  getPropNeighborMask,
   getNeighborMask,
   getTransitionLayers,
   normalizeBlobMask,
@@ -105,5 +107,29 @@ describe("autotile calculations", () => {
     ]);
 
     expect(getTransitionLayers(map, 1, 1)).toEqual([]);
+  });
+
+  it("classifies bridge connections as horizontal, vertical, corners, and full", () => {
+    expect(getBridgeConnectionShape(NEIGHBOR_MASK.E | NEIGHBOR_MASK.W)).toBe("horizontal");
+    expect(getBridgeConnectionShape(NEIGHBOR_MASK.N | NEIGHBOR_MASK.S)).toBe("vertical");
+    expect(getBridgeConnectionShape(NEIGHBOR_MASK.N | NEIGHBOR_MASK.E | NEIGHBOR_MASK.NE)).toBe("corner-ne");
+    expect(getBridgeConnectionShape(255)).toBe("full");
+  });
+
+  it("connects bridge props through cardinal and supported diagonal neighbors", () => {
+    const map = createMap([
+      ["grass", "grass", "grass"],
+      ["grass", "grass", "grass"],
+      ["grass", "grass", "grass"],
+    ]);
+    map.cells[4].prop = "footbridge";
+    map.cells[3].prop = "footbridge";
+    map.cells[5].prop = "footbridge";
+    map.cells[1].prop = "footbridge";
+    map.cells[2].prop = "footbridge";
+
+    expect(getPropNeighborMask(map, 1, 1, "footbridge")).toBe(
+      NEIGHBOR_MASK.N | NEIGHBOR_MASK.E | NEIGHBOR_MASK.W | NEIGHBOR_MASK.NE,
+    );
   });
 });

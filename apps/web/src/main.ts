@@ -3,7 +3,7 @@ import {
   cellIndex, cloneMap, createInitialMap, deserializeMap, moveProp, paintGround, placeProp, serializeMap,
   type GroundType, type MapDocument, type PropType,
 } from "./editor-model";
-import { getTransitionLayers, NEIGHBOR_MASK } from "./autotile";
+import { getBridgeConnectionShape, getPropNeighborMask, getTransitionLayers, NEIGHBOR_MASK } from "./autotile";
 import {
   AuthApiError, AuthClient, isAvatarIcon, parsePublicAppConfig,
   type AuthSession, type AvatarIcon,
@@ -406,9 +406,53 @@ function drawProp(column: number, row: number, prop: PropType, opacity = 1): voi
   const image = propImages.get(prop);
   if (!image?.complete) return;
   const size = CELL_SIZE * propScale[prop];
+  if (prop === "footbridge") {
+    drawFootbridge(column, row, image, size, opacity);
+    return;
+  }
   context.save();
   context.globalAlpha = opacity;
   context.drawImage(image, column * CELL_SIZE + CELL_SIZE / 2 - size / 2, row * CELL_SIZE + CELL_SIZE - size * 0.78, size, size);
+  context.restore();
+}
+function createBridgeConnectionPath(column: number, row: number, mask: number): Path2D {
+  const x = column * CELL_SIZE;
+  const y = row * CELL_SIZE;
+  const centerX = x + CELL_SIZE / 2;
+  const centerY = y + CELL_SIZE / 2;
+  const halfLane = CELL_SIZE * .28;
+  const path = new Path2D();
+  if (mask === 255) {
+    path.rect(x, y, CELL_SIZE, CELL_SIZE);
+    return path;
+  }
+  if (mask === 0) {
+    path.rect(centerX - halfLane, centerY - halfLane, halfLane * 2, halfLane * 2);
+    return path;
+  }
+  path.rect(centerX - halfLane, centerY - halfLane, halfLane * 2, halfLane * 2);
+  if (mask & NEIGHBOR_MASK.N) path.rect(centerX - halfLane, y, halfLane * 2, CELL_SIZE / 2);
+  if (mask & NEIGHBOR_MASK.E) path.rect(centerX, centerY - halfLane, CELL_SIZE / 2, halfLane * 2);
+  if (mask & NEIGHBOR_MASK.S) path.rect(centerX - halfLane, centerY, halfLane * 2, CELL_SIZE / 2);
+  if (mask & NEIGHBOR_MASK.W) path.rect(x, centerY - halfLane, CELL_SIZE / 2, halfLane * 2);
+  if (mask & NEIGHBOR_MASK.NE) path.rect(centerX, y, CELL_SIZE / 2, CELL_SIZE / 2);
+  if (mask & NEIGHBOR_MASK.SE) path.rect(centerX, centerY, CELL_SIZE / 2, CELL_SIZE / 2);
+  if (mask & NEIGHBOR_MASK.SW) path.rect(x, centerY, CELL_SIZE / 2, CELL_SIZE / 2);
+  if (mask & NEIGHBOR_MASK.NW) path.rect(x, y, CELL_SIZE / 2, CELL_SIZE / 2);
+  return path;
+}
+function drawFootbridge(column: number, row: number, image: HTMLImageElement, size: number, opacity: number): void {
+  const mask = getPropNeighborMask(map, column, row, "footbridge");
+  const shape = getBridgeConnectionShape(mask);
+  const centerX = column * CELL_SIZE + CELL_SIZE / 2;
+  const centerY = row * CELL_SIZE + CELL_SIZE - size * .78 + size / 2;
+  const rotation = shape === "vertical" ? Math.PI / 2 : 0;
+  context.save();
+  context.globalAlpha = opacity;
+  if (shape !== "isolated" && shape !== "full") context.clip(createBridgeConnectionPath(column, row, mask));
+  context.translate(centerX, centerY);
+  context.rotate(rotation);
+  context.drawImage(image, -size / 2, -size / 2, size, size);
   context.restore();
 }
 function render(): void {
@@ -696,21 +740,52 @@ function renderImageLibrary(items: readonly ImageAsset[]): void {
   }
   const grid = document.createElement("div");
   grid.className = "image-library-grid";
+  grid.setAttribute("role", "radiogroup");
+  grid.setAttribute("aria-label", "저장한 이미지 선택");
   for (const asset of items) {
     const card = document.createElement("figure");
     card.className = "image-library-card";
+    card.dataset.imageId = asset.id;
+    card.setAttribute("role", "radio");
+    card.setAttribute("aria-checked", "false");
+    card.tabIndex = 0;
+    const preview = document.createElement("a");
+    preview.className = "image-library-preview";
+    preview.href = asset.originalUrl;
+    preview.target = "_blank";
+    preview.rel = "noopener noreferrer";
+    preview.setAttribute("aria-label", `${asset.originalFilename} 원본 이미지 새 창에서 열기`);
     const image = document.createElement("img");
     image.src = asset.thumbnailUrl;
     image.alt = asset.originalFilename;
     image.loading = "lazy";
     image.referrerPolicy = "no-referrer";
+    preview.append(image);
     const caption = document.createElement("figcaption");
     const filename = document.createElement("strong");
     filename.textContent = asset.originalFilename;
     const metadata = document.createElement("small");
     metadata.textContent = `${Math.ceil(asset.byteSize / 1024)} KB`;
     caption.append(filename, metadata);
-    card.append(image, caption);
+    card.append(preview, caption);
+    const selectCard = (): void => {
+      const group = card.closest<HTMLElement>('[role="radiogroup"]');
+      group?.querySelectorAll<HTMLElement>('[role="radio"]').forEach((item) => {
+        const selected = item === card;
+        item.classList.toggle("is-selected", selected);
+        item.setAttribute("aria-checked", String(selected));
+      });
+      card.focus();
+    };
+    card.addEventListener("click", (event) => {
+      if (event.target instanceof Element && event.target.closest("a")) return;
+      selectCard();
+    });
+    card.addEventListener("keydown", (event) => {
+      if (event.key !== "Enter" && event.key !== " ") return;
+      event.preventDefault();
+      selectCard();
+    });
     grid.append(card);
   }
   list.append(grid);

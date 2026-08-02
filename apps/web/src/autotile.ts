@@ -4,6 +4,7 @@ import {
   isInside,
   type GroundType,
   type MapDocument,
+  type PropType,
 } from "./editor-model";
 
 export const NEIGHBOR_MASK = {
@@ -103,6 +104,75 @@ export function getNeighborMask(
   }, 0);
 
   return normalizeBlobMask(mask);
+}
+
+/**
+ * Returns the valid 8-direction connection mask around a prop cell.
+ * Diagonal connections follow the same rule as ground blob tiles: both
+ * touching cardinal neighbors must also be connected.
+ */
+export function getPropNeighborMask(
+  map: MapDocument,
+  column: number,
+  row: number,
+  prop: PropType,
+): number {
+  if (!isInside(map, column, row)) return 0;
+  if (map.cells[cellIndex(map, column, row)].prop !== prop) return 0;
+
+  const directions = [
+    { column: 0, row: -1, bit: NEIGHBOR_MASK.N },
+    { column: 1, row: 0, bit: NEIGHBOR_MASK.E },
+    { column: 0, row: 1, bit: NEIGHBOR_MASK.S },
+    { column: -1, row: 0, bit: NEIGHBOR_MASK.W },
+    { column: 1, row: -1, bit: NEIGHBOR_MASK.NE },
+    { column: 1, row: 1, bit: NEIGHBOR_MASK.SE },
+    { column: -1, row: 1, bit: NEIGHBOR_MASK.SW },
+    { column: -1, row: -1, bit: NEIGHBOR_MASK.NW },
+  ];
+
+  const mask = directions.reduce((result, direction) => {
+    if (!isInside(map, column + direction.column, row + direction.row)) return result;
+    return map.cells[cellIndex(map, column + direction.column, row + direction.row)].prop === prop
+      ? result | direction.bit
+      : result;
+  }, 0);
+
+  return normalizeBlobMask(mask);
+}
+
+export type BridgeConnectionShape =
+  | "isolated"
+  | "horizontal"
+  | "vertical"
+  | "corner-ne"
+  | "corner-se"
+  | "corner-sw"
+  | "corner-nw"
+  | "junction"
+  | "full";
+
+/**
+ * Classifies the primary bridge direction while preserving the full mask
+ * for rendering diagonal fills and junctions.
+ */
+export function getBridgeConnectionShape(mask: number): BridgeConnectionShape {
+  const normalized = normalizeBlobMask(mask);
+  if (normalized === 0) return "isolated";
+  if (normalized === 255) return "full";
+
+  const cardinalMask = normalized & (
+    NEIGHBOR_MASK.N | NEIGHBOR_MASK.E | NEIGHBOR_MASK.S | NEIGHBOR_MASK.W
+  );
+  if (cardinalMask === (NEIGHBOR_MASK.E | NEIGHBOR_MASK.W)) return "horizontal";
+  if (cardinalMask === (NEIGHBOR_MASK.N | NEIGHBOR_MASK.S)) return "vertical";
+  if (cardinalMask === (NEIGHBOR_MASK.N | NEIGHBOR_MASK.E)) return "corner-ne";
+  if (cardinalMask === (NEIGHBOR_MASK.E | NEIGHBOR_MASK.S)) return "corner-se";
+  if (cardinalMask === (NEIGHBOR_MASK.S | NEIGHBOR_MASK.W)) return "corner-sw";
+  if (cardinalMask === (NEIGHBOR_MASK.W | NEIGHBOR_MASK.N)) return "corner-nw";
+  if (cardinalMask === NEIGHBOR_MASK.N || cardinalMask === NEIGHBOR_MASK.S) return "vertical";
+  if (cardinalMask === NEIGHBOR_MASK.E || cardinalMask === NEIGHBOR_MASK.W) return "horizontal";
+  return "junction";
 }
 
 /**

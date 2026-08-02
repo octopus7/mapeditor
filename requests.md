@@ -379,6 +379,13 @@
 - Preserved the existing middle-button/drag panning behavior.
 - Passed web checks (39), deployed Worker and Pages, and verified the live bundle contains the wheel zoom and 12.5% limit.
 
+## Add connected bridge rendering 2026-08-02 21:48:00 ~ 2026-08-02 21:54:05 (6분 5초)
+
+- Added 8-direction footbridge neighbor masks with diagonal connections requiring both touching cardinal connections.
+- Rendered connected bridges as horizontal, vertical, corner, and junction shapes using clipped bridge imagery.
+- Rendered the fully connected 255 mask with the complete bridge image.
+- Added autotile tests for bridge masks and shapes; passed web checks (41), deployed Worker and Pages, and verified the live bundle and Worker health.
+
 ## Verify unauthenticated image API access 2026-08-02 21:38:25 ~ 2026-08-02 21:39:23 (0분 58초)
 
 - Reviewed the Worker route and confirmed both `GET /images` and `POST /images` call `requireProfile()` before accessing image data or the upload service.

@@ -192,7 +192,10 @@ dialog::backdrop { background: rgba(15, 28, 19, .78); backdrop-filter: blur(5px)
 .image-upload-row input { min-width: 0; padding: 6px 8px; }
 .image-upload-row .button { min-height: 38px; }
 .image-library-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(125px, 1fr)); gap: 10px; }
-.image-library-card { min-width: 0; overflow: hidden; border: 1px solid #dfe2da; border-radius: 9px; background: #fff; }
+.image-library-card { min-width: 0; overflow: hidden; border: 1px solid #dfe2da; border-radius: 9px; background: #fff; cursor: pointer; }
+.image-library-card:focus-visible { outline: 3px solid #c7904e; outline-offset: 2px; }
+.image-library-card.is-selected { border-color: #6e8c71; background: #e5eee4; box-shadow: inset 0 0 0 1px #6e8c71; }
+.image-library-preview { display: block; color: inherit; cursor: zoom-in; }
 .image-library-card img { display: block; width: 100%; aspect-ratio: 1; object-fit: cover; background: #edf0e8; }
 .image-library-card figcaption { padding: 8px; }
 .image-library-card strong, .image-library-card small { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
@@ -216,6 +219,7 @@ dialog::backdrop { background: rgba(15, 28, 19, .78); backdrop-filter: blur(5px)
 .image-page-list .image-library-grid { grid-template-columns: repeat(auto-fill, minmax(180px, 1fr)); gap: 18px; }
 .image-page-list .image-library-card { border-color: #d5dbd1; border-radius: 13px; box-shadow: 0 5px 16px rgba(44, 65, 48, .06); transition: transform .18s ease, box-shadow .18s ease; }
 .image-page-list .image-library-card:hover { transform: translateY(-3px); box-shadow: 0 12px 24px rgba(44, 65, 48, .13); }
+.image-page-list .image-library-card.is-selected { border-color: #6e8c71; background: #e5eee4; box-shadow: inset 0 0 0 1px #6e8c71, 0 8px 20px rgba(44, 65, 48, .1); }
 .image-page-list .image-library-card img { aspect-ratio: 4 / 3; padding: 10px; object-fit: contain; }
 .image-page-list .image-library-card figcaption { padding: 11px 12px 13px; }
 .image-page-list .image-library-card strong { font-size: 11px; }.image-page-list .image-library-card small { font-size: 9px; }
