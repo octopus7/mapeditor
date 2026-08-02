@@ -96,7 +96,7 @@ document.querySelector<HTMLDivElement>("#app")!.innerHTML = `
         <div class="canvas-scroll"><div class="canvas-frame">
           <canvas id="map-canvas" aria-label="28 곱하기 18 타일 지도" tabindex="0"></canvas>
         </div></div>
-        <div class="stage-footer"><span><b>28 × 18</b> 셀</span><span id="cursor-status">셀 위에 커서를 올려보세요</span><span>로컬 초안</span></div>
+        <div class="stage-footer"><span><b>28 × 18</b> 셀</span><span id="cursor-status">셀 위에 커서를 올려보세요</span><span class="footer-links">로컬 초안 · <a href="https://mapeditor.pages.dev/cdn-cgi/trace" target="_blank" rel="noopener noreferrer">cdn trace</a> · <a href="https://github.com/octopus7/mapeditor" target="_blank" rel="noopener noreferrer">github</a></span></div>
       </section>
 
       <aside class="reference-panel" aria-label="레이아웃 참고 이미지">

@@ -68,6 +68,8 @@ button:focus-visible, input:focus-visible, canvas:focus-visible { outline: 3px s
 .canvas-stage { min-width: 0; display: grid; grid-template-rows: 49px minmax(0, 1fr) 39px; overflow: hidden; background: #d9d9ce; }
 .stage-toolbar, .stage-footer { display: flex; align-items: center; justify-content: space-between; padding: 0 18px; color: #717b73; background: #efeee6; font-size: 10px; }
 .stage-toolbar { border-bottom: 1px solid #cdd0c6; }.stage-footer { border-top: 1px solid #cdd0c6; }.stage-footer b { color: #35483b; }
+.footer-links a { color: inherit; opacity: .42; text-decoration: none; transition: opacity .18s ease; }
+.footer-links a:hover, .footer-links a:focus-visible { opacity: .78; text-decoration: underline; }
 .status-dot { display: flex; align-items: center; gap: 7px; }.status-dot i { width: 6px; height: 6px; border-radius: 50%; background: #5d875c; box-shadow: 0 0 0 3px rgba(93, 135, 92, .12); }
 .stage-controls { display: flex; gap: 5px; }
 .icon-button { width: 29px; height: 29px; border: 1px solid #d0d3ca; border-radius: 6px; color: #7e8880; background: #f8f7f0; cursor: pointer; font-size: 13px; }
