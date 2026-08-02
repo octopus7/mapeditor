@@ -533,20 +533,19 @@ const canvas = document.querySelector<HTMLCanvasElement>("#map-canvas")!;
 const canvasFrame = document.querySelector<HTMLDivElement>("#canvas-frame")!;
 const canvasScroll = document.querySelector<HTMLDivElement>(".canvas-scroll")!;
 const context = canvas.getContext("2d")!;
-const groundTextureCanvas = document.createElement("canvas");
-groundTextureCanvas.width = CELL_SIZE;
-groundTextureCanvas.height = CELL_SIZE;
-const groundTextureContext = groundTextureCanvas.getContext("2d")!;
-groundTextureContext.imageSmoothingEnabled = false;
-const groundTextureImage = groundTextureContext.createImageData(CELL_SIZE, CELL_SIZE);
+const MAX_GROUND_TEXTURE_CACHE_ENTRIES = 1024;
+const groundTextureCache = new Map<string, HTMLCanvasElement>();
 const brightnessCorrectionCanvas = document.createElement("canvas");
 const brightnessCorrectionContext = brightnessCorrectionCanvas.getContext("2d")!;
 const brightnessCorrectionPatchCanvas = document.createElement("canvas");
 const brightnessCorrectionPatchContext = brightnessCorrectionPatchCanvas.getContext("2d")!;
 brightnessCorrectionPatchContext.imageSmoothingEnabled = false;
 const brightnessCorrectionDirtyCells = new Set<number>();
+const brightnessCorrectionColorCache = new Map<string, string>();
 let brightnessCorrectionCacheReady = false;
 let brightnessCorrectionActiveCellCount = 0;
+let brightnessCorrectionFullBuild: { nextRow: number; activeCellCount: number } | null = null;
+let brightnessCorrectionBuildScheduled = false;
 function syncCanvasSize(): void {
   canvas.width = map.columns * CELL_SIZE;
   canvas.height = map.rows * CELL_SIZE;
@@ -576,7 +575,7 @@ function escapeHtml(value: string): string {
 const GROUND_NOISE_TEXTURE_SIZE = 256;
 const GROUND_NOISE_GRID_SIZE = 32;
 const GROUND_NOISE_PATTERN_SEED = 0x6d617065;
-function createGroundNoiseTexture(): Int8Array {
+function createGroundNoisePattern(): Int8Array {
   const coarsePattern = new Int8Array(GROUND_NOISE_GRID_SIZE * GROUND_NOISE_GRID_SIZE);
   let state = GROUND_NOISE_PATTERN_SEED;
   for (let index = 0; index < coarsePattern.length; index += 1) {
@@ -586,10 +585,20 @@ function createGroundNoiseTexture(): Int8Array {
     state >>>= 0;
     coarsePattern[index] = (state % 11) - 5;
   }
-  const texture = new Int8Array(GROUND_NOISE_TEXTURE_SIZE * GROUND_NOISE_TEXTURE_SIZE);
+  return coarsePattern;
+}
+const GROUND_NOISE_PATTERN = createGroundNoisePattern();
+const GROUND_NOISE_TEXTURE = new Int8Array(GROUND_NOISE_TEXTURE_SIZE * GROUND_NOISE_TEXTURE_SIZE);
+let groundNoiseReady = false;
+let groundNoiseBuildRow = 0;
+let groundNoiseBuildScheduled = false;
+function processGroundNoiseBuild(): void {
+  groundNoiseBuildScheduled = false;
+  const startedAt = performance.now();
   const sampleStep = GROUND_NOISE_TEXTURE_SIZE / GROUND_NOISE_GRID_SIZE;
   const smoothStep = (value: number): number => value * value * (3 - 2 * value);
-  for (let y = 0; y < GROUND_NOISE_TEXTURE_SIZE; y += 1) {
+  while (groundNoiseBuildRow < GROUND_NOISE_TEXTURE_SIZE && performance.now() - startedAt < 6) {
+    const y = groundNoiseBuildRow;
     const gridY = y / sampleStep;
     const gridY0 = Math.floor(gridY) % GROUND_NOISE_GRID_SIZE;
     const gridY1 = (gridY0 + 1) % GROUND_NOISE_GRID_SIZE;
@@ -599,17 +608,29 @@ function createGroundNoiseTexture(): Int8Array {
       const gridX0 = Math.floor(gridX) % GROUND_NOISE_GRID_SIZE;
       const gridX1 = (gridX0 + 1) % GROUND_NOISE_GRID_SIZE;
       const xWeight = smoothStep(gridX - Math.floor(gridX));
-      const top = coarsePattern[gridY0 * GROUND_NOISE_GRID_SIZE + gridX0] * (1 - xWeight)
-        + coarsePattern[gridY0 * GROUND_NOISE_GRID_SIZE + gridX1] * xWeight;
-      const bottom = coarsePattern[gridY1 * GROUND_NOISE_GRID_SIZE + gridX0] * (1 - xWeight)
-        + coarsePattern[gridY1 * GROUND_NOISE_GRID_SIZE + gridX1] * xWeight;
-      texture[y * GROUND_NOISE_TEXTURE_SIZE + x] = Math.round(top * (1 - yWeight) + bottom * yWeight);
+      const top = GROUND_NOISE_PATTERN[gridY0 * GROUND_NOISE_GRID_SIZE + gridX0] * (1 - xWeight)
+        + GROUND_NOISE_PATTERN[gridY0 * GROUND_NOISE_GRID_SIZE + gridX1] * xWeight;
+      const bottom = GROUND_NOISE_PATTERN[gridY1 * GROUND_NOISE_GRID_SIZE + gridX0] * (1 - xWeight)
+        + GROUND_NOISE_PATTERN[gridY1 * GROUND_NOISE_GRID_SIZE + gridX1] * xWeight;
+      GROUND_NOISE_TEXTURE[y * GROUND_NOISE_TEXTURE_SIZE + x] = Math.round(top * (1 - yWeight) + bottom * yWeight);
     }
+    groundNoiseBuildRow += 1;
   }
-  return texture;
+  if (groundNoiseBuildRow < GROUND_NOISE_TEXTURE_SIZE) {
+    groundNoiseBuildScheduled = true;
+    window.setTimeout(processGroundNoiseBuild, 0);
+    return;
+  }
+  groundNoiseReady = true;
+  scheduleRender();
 }
-const GROUND_NOISE_TEXTURE = createGroundNoiseTexture();
+function scheduleGroundNoiseBuild(): void {
+  if (groundNoiseReady || groundNoiseBuildScheduled) return;
+  groundNoiseBuildScheduled = true;
+  window.setTimeout(processGroundNoiseBuild, 0);
+}
 function textureNoise(x: number, y: number): number {
+  if (!groundNoiseReady) return 0;
   const textureX = ((x % GROUND_NOISE_TEXTURE_SIZE) + GROUND_NOISE_TEXTURE_SIZE) % GROUND_NOISE_TEXTURE_SIZE;
   const textureY = ((y % GROUND_NOISE_TEXTURE_SIZE) + GROUND_NOISE_TEXTURE_SIZE) % GROUND_NOISE_TEXTURE_SIZE;
   return GROUND_NOISE_TEXTURE[textureY * GROUND_NOISE_TEXTURE_SIZE + textureX];
@@ -625,30 +646,116 @@ function mixGroundColor(palette: [number, number, number], noise: number): [numb
   const target = noise >= 0 ? 255 : 0;
   return palette.map((channel) => Math.round(channel * (1 - amount) + target * amount)) as [number, number, number];
 }
+const GROUND_TEXTURE_ATLAS_SIZE = GROUND_NOISE_TEXTURE_SIZE + CELL_SIZE;
+const groundTextureAtlases = new Map<string, HTMLCanvasElement>();
+const groundTextureBuildQueue: Array<{
+  key: string;
+  ground: GroundType;
+  depth: number;
+  canvas: HTMLCanvasElement;
+  context: CanvasRenderingContext2D;
+  image: ImageData;
+  nextRow: number;
+}> = [];
+const groundTextureBuildPending = new Set<string>();
+let groundTextureBuildScheduled = false;
+function getGroundBaseColor(ground: GroundType, depth: number): [number, number, number] {
+  let [r, g, b] = groundPalettes[ground];
+  if (ground !== "water") return [r, g, b];
+  const depthRatio = depth / 8;
+  const deepWater: [number, number, number] = [22, 83, 101];
+  r = Math.round(r * (1 - depthRatio * .72) + deepWater[0] * (depthRatio * .72));
+  g = Math.round(g * (1 - depthRatio * .72) + deepWater[1] * (depthRatio * .72));
+  b = Math.round(b * (1 - depthRatio * .72) + deepWater[2] * (depthRatio * .72));
+  return [r, g, b];
+}
+function getGroundTextureDepth(column: number, row: number, ground: GroundType): number {
+  return ground === "water" ? Math.min(Math.max(waterDepths[cellIndex(map, column, row)] ?? 0, 0), 8) : 0;
+}
+function enqueueGroundTextureAtlas(ground: GroundType, depth: number): void {
+  if (!groundNoiseReady) {
+    scheduleGroundNoiseBuild();
+    return;
+  }
+  const key = `${ground},${depth}`;
+  if (groundTextureAtlases.has(key) || groundTextureBuildPending.has(key)) return;
+  const canvas = document.createElement("canvas");
+  canvas.width = GROUND_TEXTURE_ATLAS_SIZE;
+  canvas.height = GROUND_TEXTURE_ATLAS_SIZE;
+  const context = canvas.getContext("2d")!;
+  context.imageSmoothingEnabled = false;
+  groundTextureBuildQueue.push({
+    key,
+    ground,
+    depth,
+    canvas,
+    context,
+    image: context.createImageData(GROUND_TEXTURE_ATLAS_SIZE, GROUND_TEXTURE_ATLAS_SIZE),
+    nextRow: 0,
+  });
+  groundTextureBuildPending.add(key);
+  if (!groundTextureBuildScheduled) {
+    groundTextureBuildScheduled = true;
+    window.setTimeout(processGroundTextureBuildQueue, 0);
+  }
+}
+function processGroundTextureBuildQueue(): void {
+  groundTextureBuildScheduled = false;
+  const startedAt = performance.now();
+  while (groundTextureBuildQueue.length > 0 && performance.now() - startedAt < 6) {
+    const build = groundTextureBuildQueue[0];
+    const [r, g, b] = getGroundBaseColor(build.ground, build.depth);
+    const baseColor: [number, number, number] = [r, g, b];
+    const pixels = build.image.data;
+    while (build.nextRow < GROUND_TEXTURE_ATLAS_SIZE && performance.now() - startedAt < 6) {
+      const localY = build.nextRow;
+      const noiseY = localY % GROUND_NOISE_TEXTURE_SIZE;
+      for (let localX = 0; localX < GROUND_TEXTURE_ATLAS_SIZE; localX += 1) {
+        const noiseX = localX % GROUND_NOISE_TEXTURE_SIZE;
+        const [pixelR, pixelG, pixelB] = mixGroundColor(baseColor, textureNoise(noiseX, noiseY));
+        const pixelIndex = (localY * GROUND_TEXTURE_ATLAS_SIZE + localX) * 4;
+        pixels[pixelIndex] = pixelR;
+        pixels[pixelIndex + 1] = pixelG;
+        pixels[pixelIndex + 2] = pixelB;
+        pixels[pixelIndex + 3] = 255;
+      }
+      build.nextRow += 1;
+    }
+    if (build.nextRow < GROUND_TEXTURE_ATLAS_SIZE) break;
+    build.context.putImageData(build.image, 0, 0);
+    groundTextureAtlases.set(build.key, build.canvas);
+    groundTextureBuildPending.delete(build.key);
+    groundTextureBuildQueue.shift();
+  }
+  if (groundTextureBuildQueue.length > 0) {
+    groundTextureBuildScheduled = true;
+    window.setTimeout(processGroundTextureBuildQueue, 0);
+  } else {
+    scheduleRender();
+  }
+}
+function getGroundTextureAtlas(column: number, row: number, ground: GroundType): HTMLCanvasElement | null {
+  const depth = getGroundTextureDepth(column, row, ground);
+  const key = `${ground},${depth}`;
+  const cached = groundTextureAtlases.get(key);
+  if (cached) return cached;
+  enqueueGroundTextureAtlas(ground, depth);
+  return null;
+}
 function drawGroundTexture(column: number, row: number, ground: GroundType): void {
   const x = column * CELL_SIZE;
   const y = row * CELL_SIZE;
-  let [r, g, b] = groundPalettes[ground];
-  if (ground === "water") {
-    const depth = Math.min(Math.max(waterDepths[cellIndex(map, column, row)] ?? 0, 0), 8);
-    const depthRatio = depth / 8;
-    const deepWater: [number, number, number] = [22, 83, 101];
-    r = Math.round(r * (1 - depthRatio * .72) + deepWater[0] * (depthRatio * .72));
-    g = Math.round(g * (1 - depthRatio * .72) + deepWater[1] * (depthRatio * .72));
-    b = Math.round(b * (1 - depthRatio * .72) + deepWater[2] * (depthRatio * .72));
+  const depth = getGroundTextureDepth(column, row, ground);
+  const atlas = getGroundTextureAtlas(column, row, ground);
+  if (atlas) {
+    const sourceX = ((column * CELL_SIZE) % GROUND_NOISE_TEXTURE_SIZE + GROUND_NOISE_TEXTURE_SIZE) % GROUND_NOISE_TEXTURE_SIZE;
+    const sourceY = ((row * CELL_SIZE) % GROUND_NOISE_TEXTURE_SIZE + GROUND_NOISE_TEXTURE_SIZE) % GROUND_NOISE_TEXTURE_SIZE;
+    context.drawImage(atlas, sourceX, sourceY, CELL_SIZE, CELL_SIZE, x, y, CELL_SIZE, CELL_SIZE);
+  } else {
+    const [r, g, b] = getGroundBaseColor(ground, depth);
+    context.fillStyle = `rgb(${r}, ${g}, ${b})`;
+    context.fillRect(x, y, CELL_SIZE, CELL_SIZE);
   }
-  const baseColor: [number, number, number] = [r, g, b];
-  const pixels = groundTextureImage.data;
-  for (let localY = 0; localY < CELL_SIZE; localY += 1) for (let localX = 0; localX < CELL_SIZE; localX += 1) {
-    const [pixelR, pixelG, pixelB] = mixGroundColor(baseColor, textureNoise(x + localX, y + localY));
-    const pixelIndex = (localY * CELL_SIZE + localX) * 4;
-    pixels[pixelIndex] = pixelR;
-    pixels[pixelIndex + 1] = pixelG;
-    pixels[pixelIndex + 2] = pixelB;
-    pixels[pixelIndex + 3] = 255;
-  }
-  groundTextureContext.putImageData(groundTextureImage, 0, 0);
-  context.drawImage(groundTextureCanvas, x, y);
   context.save(); context.globalAlpha = 0.22;
   if (ground === "grass") {
     context.strokeStyle = "#d9e6a2"; context.beginPath();
@@ -957,11 +1064,13 @@ const brightnessCorrectionSaturationBoost: Record<BrightnessCorrection, number> 
   2: .12,
   3: .18,
 };
-const BRIGHTNESS_CORRECTION_INSET = CELL_SIZE / 8;
-const BRIGHTNESS_CORRECTION_BLUR = BRIGHTNESS_CORRECTION_INSET;
+const BRIGHTNESS_CORRECTION_BLUR = CELL_SIZE / 8;
 type BrightnessCorrectionRect = { x: number; y: number; width: number; height: number };
 
 function getBrightnessCorrectionColor(ground: GroundType, level: BrightnessCorrection): string {
+  const key = `${ground},${level}`;
+  const cached = brightnessCorrectionColorCache.get(key);
+  if (cached) return cached;
   const [red, green, blue] = groundPalettes[ground];
   const maximum = Math.max(red, green, blue) / 255;
   const minimum = Math.min(red, green, blue) / 255;
@@ -979,12 +1088,15 @@ function getBrightnessCorrectionColor(ground: GroundType, level: BrightnessCorre
   }
   const correctedLightness = Math.max(.08, lightness + brightnessCorrectionLightnessShift[level]);
   const correctedSaturation = Math.min(1, saturation + brightnessCorrectionSaturationBoost[level]);
-  return `hsl(${hue} ${Math.round(correctedSaturation * 100)}% ${Math.round(correctedLightness * 100)}%)`;
+  const color = `hsl(${hue} ${Math.round(correctedSaturation * 100)}% ${Math.round(correctedLightness * 100)}%)`;
+  brightnessCorrectionColorCache.set(key, color);
+  return color;
 }
 
 function invalidateBrightnessCorrectionCache(): void {
   brightnessCorrectionCacheReady = false;
   brightnessCorrectionActiveCellCount = 0;
+  brightnessCorrectionFullBuild = null;
   brightnessCorrectionDirtyCells.clear();
   brightnessCorrectionPatchCanvas.width = 1;
   brightnessCorrectionPatchCanvas.height = 1;
@@ -995,7 +1107,10 @@ function markBrightnessCorrectionChanges(
   next: MapDocument,
   cells: CellPosition[],
 ): void {
-  if (!brightnessCorrectionCacheReady) return;
+  if (!brightnessCorrectionCacheReady) {
+    if (brightnessCorrectionFullBuild) invalidateBrightnessCorrectionCache();
+    return;
+  }
   const changedIndexes = new Set<number>();
   for (const cell of cells) {
     if (cell.column < 0 || cell.column >= next.columns || cell.row < 0 || cell.row >= next.rows) continue;
@@ -1077,10 +1192,10 @@ function redrawBrightnessCorrectionRegion(region: BrightnessCorrectionRect): voi
     brightnessCorrectionPatchContext.fillStyle = getBrightnessCorrectionColor(cell.ground, level);
     brightnessCorrectionPatchContext.globalAlpha = brightnessCorrectionAlpha[level];
     brightnessCorrectionPatchContext.fillRect(
-      column * CELL_SIZE + BRIGHTNESS_CORRECTION_INSET - patchX,
-      row * CELL_SIZE + BRIGHTNESS_CORRECTION_INSET - patchY,
-      CELL_SIZE - BRIGHTNESS_CORRECTION_INSET * 2,
-      CELL_SIZE - BRIGHTNESS_CORRECTION_INSET * 2,
+      column * CELL_SIZE - patchX,
+      row * CELL_SIZE - patchY,
+      CELL_SIZE,
+      CELL_SIZE,
     );
   }
   brightnessCorrectionPatchContext.globalAlpha = 1;
@@ -1097,16 +1212,62 @@ function redrawBrightnessCorrectionRegion(region: BrightnessCorrectionRect): voi
   brightnessCorrectionContext.restore();
 }
 
+function scheduleBrightnessCorrectionBuild(): void {
+  if (brightnessCorrectionBuildScheduled || !brightnessCorrectionFullBuild) return;
+  brightnessCorrectionBuildScheduled = true;
+  window.setTimeout(processBrightnessCorrectionBuild, 0);
+}
+
+function processBrightnessCorrectionBuild(): void {
+  brightnessCorrectionBuildScheduled = false;
+  const build = brightnessCorrectionFullBuild;
+  if (!build) return;
+  const startedAt = performance.now();
+  while (build.nextRow < map.rows && performance.now() - startedAt < 6) {
+    const row = build.nextRow;
+    for (let column = 0; column < map.columns; column += 1) {
+      const cell = map.cells[cellIndex(map, column, row)];
+      const level = cell.brightnessCorrection ?? 0;
+      if (level === 0) continue;
+      build.activeCellCount += 1;
+      brightnessCorrectionPatchContext.fillStyle = getBrightnessCorrectionColor(cell.ground, level);
+      brightnessCorrectionPatchContext.globalAlpha = brightnessCorrectionAlpha[level];
+      brightnessCorrectionPatchContext.fillRect(column * CELL_SIZE, row * CELL_SIZE, CELL_SIZE, CELL_SIZE);
+    }
+    build.nextRow += 1;
+  }
+  brightnessCorrectionPatchContext.globalAlpha = 1;
+  if (build.nextRow < map.rows) {
+    scheduleBrightnessCorrectionBuild();
+    return;
+  }
+  brightnessCorrectionActiveCellCount = build.activeCellCount;
+  brightnessCorrectionContext.clearRect(0, 0, canvas.width, canvas.height);
+  brightnessCorrectionContext.save();
+  brightnessCorrectionContext.filter = `blur(${BRIGHTNESS_CORRECTION_BLUR}px)`;
+  brightnessCorrectionContext.drawImage(brightnessCorrectionPatchCanvas, 0, 0);
+  brightnessCorrectionContext.restore();
+  brightnessCorrectionCacheReady = true;
+  brightnessCorrectionDirtyCells.clear();
+  brightnessCorrectionFullBuild = null;
+  brightnessCorrectionPatchCanvas.width = 1;
+  brightnessCorrectionPatchCanvas.height = 1;
+  scheduleRender();
+}
+
+function startBrightnessCorrectionBuild(): void {
+  if (brightnessCorrectionCacheReady || brightnessCorrectionFullBuild) return;
+  brightnessCorrectionPatchCanvas.width = canvas.width;
+  brightnessCorrectionPatchCanvas.height = canvas.height;
+  brightnessCorrectionPatchContext.imageSmoothingEnabled = false;
+  brightnessCorrectionPatchContext.clearRect(0, 0, canvas.width, canvas.height);
+  brightnessCorrectionFullBuild = { nextRow: 0, activeCellCount: 0 };
+  scheduleBrightnessCorrectionBuild();
+}
+
 function refreshBrightnessCorrectionCache(): void {
   if (!brightnessCorrectionCacheReady) {
-    brightnessCorrectionActiveCellCount = 0;
-    for (const cell of map.cells) if ((cell.brightnessCorrection ?? 0) > 0) brightnessCorrectionActiveCellCount += 1;
-    brightnessCorrectionContext.clearRect(0, 0, canvas.width, canvas.height);
-    redrawBrightnessCorrectionRegion({ x: 0, y: 0, width: canvas.width, height: canvas.height });
-    brightnessCorrectionCacheReady = true;
-    brightnessCorrectionDirtyCells.clear();
-    brightnessCorrectionPatchCanvas.width = 1;
-    brightnessCorrectionPatchCanvas.height = 1;
+    startBrightnessCorrectionBuild();
     return;
   }
   if (brightnessCorrectionDirtyCells.size === 0) return;
@@ -1121,7 +1282,7 @@ function refreshBrightnessCorrectionCache(): void {
 
 function drawBrightnessCorrections(): void {
   refreshBrightnessCorrectionCache();
-  if (brightnessCorrectionActiveCellCount === 0) return;
+  if (!brightnessCorrectionCacheReady || brightnessCorrectionActiveCellCount === 0) return;
   context.save();
   context.filter = "none";
   context.drawImage(brightnessCorrectionCanvas, 0, 0);
@@ -1157,8 +1318,17 @@ function drawShapePreview(): void {
   }
   context.restore();
 }
+let renderScheduled = false;
+function scheduleRender(): void {
+  if (renderScheduled) return;
+  renderScheduled = true;
+  window.requestAnimationFrame(() => {
+    renderScheduled = false;
+    render();
+  });
+}
 const propScale: Record<PropType, number> = {
-  "broadleaf-tree": 2.15, "pine-tree": 2.05, shrub: 1.25, boulder: 1.35, "fallen-log": 1.65, footbridge: 1.65,
+  "broadleaf-tree": 2.15, "pine-tree": 2.05, shrub: 1.25, boulder: 1.35, "fallen-log": 1.65, footbridge: 1.5,
 };
 function drawProp(column: number, row: number, prop: PropType, opacity = 1): void {
   const image = propImages.get(prop);
@@ -1174,6 +1344,11 @@ function drawProp(column: number, row: number, prop: PropType, opacity = 1): voi
   const imageY = prop === "shrub" ? centerY - size / 2 : row * CELL_SIZE + CELL_SIZE - size * 0.78;
   context.drawImage(image, column * CELL_SIZE + CELL_SIZE / 2 - size / 2, imageY, size, size);
   context.restore();
+}
+function createBridgeCellPath(column: number, row: number): Path2D {
+  const path = new Path2D();
+  path.rect(column * CELL_SIZE, row * CELL_SIZE, CELL_SIZE, CELL_SIZE);
+  return path;
 }
 function createBridgeArmPath(column: number, row: number, direction: BridgeDirection): Path2D {
   const x = column * CELL_SIZE;
@@ -1244,6 +1419,7 @@ function drawBridgeTexturePass(
   const rotation = direction === "E" || direction === "W" ? Math.PI / 2 : 0;
   context.save();
   context.globalAlpha = opacity;
+  context.clip(createBridgeCellPath(column, row));
   if (clipPath) context.clip(clipPath);
   context.translate(centerX, centerY);
   context.rotate(rotation);
@@ -3595,6 +3771,7 @@ syncImageTransformControls();
 renderImageMaterials();
 updateFullscreenButton();
 updateViewport();
+scheduleGroundNoiseBuild();
 render();
 if (isImageLibraryPage) {
   void initializeStandaloneImageLibraryPage();
