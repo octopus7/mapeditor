@@ -1,0 +1,8 @@
+node_modules/
+.wrangler/
+
+# 실제 시크릿 파일
+.dev.vars
+.dev.vars.*
+.env
+.env.*
