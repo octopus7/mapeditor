@@ -11,6 +11,10 @@ function createSmallMap(): MapDocument {
   map.cells[7] = { ground: "stone", prop: "pine-tree" };
   map.cells[56] = { ground: "dirt", prop: "shrub" };
   map.cells[63] = { ground: "water", prop: "footbridge" };
+  map.images = [
+    { imageId: "asset-1", column: 2, row: 3, rotation: 90, scale: 2 },
+    { imageId: "asset-2", column: 7, row: 7, rotation: 0, scale: 1 },
+  ];
   return map;
 }
 
@@ -38,6 +42,10 @@ describe("resizeMap", () => {
     expect(resized.cells[1 * 10 + 8]).toEqual({ ground: "stone", prop: "pine-tree" });
     expect(resized.cells[8 * 10 + 1]).toEqual({ ground: "dirt", prop: "shrub" });
     expect(resized.cells[8 * 10 + 8]).toEqual({ ground: "water", prop: "footbridge" });
+    expect(resized.images).toEqual([
+      { imageId: "asset-1", column: 3, row: 4, rotation: 90, scale: 2 },
+      { imageId: "asset-2", column: 8, row: 8, rotation: 0, scale: 1 },
+    ]);
   });
 
   it("validates the requested dimensions", () => {

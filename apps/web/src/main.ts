@@ -4,7 +4,7 @@ import {
   moveProp, paintGround, placeImage, placeProp, removeImage, serializeMap, updateImageTransform,
   type GroundType, type MapDocument, type MapImagePlacement, type PropType,
 } from "./editor-model";
-import { getBridgeConnectionShape, getPropNeighborMask, getTransitionLayers, NEIGHBOR_MASK } from "./autotile";
+import { getBridgeConnectionShape, getBridgeTextureRotation, getPropNeighborMask, getTransitionLayers, NEIGHBOR_MASK } from "./autotile";
 import {
   AuthApiError, AuthClient, isAvatarIcon, parsePublicAppConfig,
   type AuthSession, type AvatarIcon,
@@ -496,7 +496,7 @@ function drawFootbridge(column: number, row: number, image: HTMLImageElement, si
   const shape = getBridgeConnectionShape(mask);
   const centerX = column * CELL_SIZE + CELL_SIZE / 2;
   const centerY = row * CELL_SIZE + CELL_SIZE - size * .78 + size / 2;
-  const rotation = shape === "vertical" ? Math.PI / 2 : 0;
+  const rotation = getBridgeTextureRotation(shape) * Math.PI / 180;
   context.save();
   context.globalAlpha = opacity;
   if (shape !== "isolated" && shape !== "full") context.clip(createBridgeConnectionPath(column, row, mask));
@@ -614,6 +614,24 @@ function getCell(event: PointerEvent): CellPosition | null {
   if (event.clientX < rect.left || event.clientX >= rect.right || event.clientY < rect.top || event.clientY >= rect.bottom) return null;
   return { column: Math.floor(((event.clientX - rect.left) / rect.width) * map.columns), row: Math.floor(((event.clientY - rect.top) / rect.height) * map.rows) };
 }
+function getTopImageIndex(column: number, row: number): number {
+  for (let index = map.images.length - 1; index >= 0; index -= 1) {
+    const image = map.images[index];
+    if (image.column === column && image.row === row) return index;
+  }
+  return -1;
+}
+function selectImagePlacement(index: number): void {
+  const image = map.images[index];
+  if (!image) return;
+  selectedImagePlacementIndex = index;
+  selectedImageId = image.imageId;
+  selectedImageRotation = image.rotation;
+  selectedImageScale = image.scale;
+  syncImageTransformControls();
+  renderImageMaterials();
+  render();
+}
 function paintAt(event: PointerEvent): void {
   const cell = getCell(event);
   const key = cell ? `${cell.column}:${cell.row}` : "outside";
@@ -634,7 +652,32 @@ function paintAt(event: PointerEvent): void {
     render();
     return;
   }
+  if (selectedLayer === "image" && imageMode === "move" && movingImage) {
+    movingImage.target = cell;
+    render();
+    return;
+  }
   const erase = (selectedLayer === "prop" && propMode === "erase") || event.button === 2 || (event.buttons & 2) === 2;
+  if (selectedLayer === "image") {
+    const candidate = cloneMap(map);
+    const imageIndex = getTopImageIndex(column, row);
+    const changed = imageMode === "erase" || erase
+      ? imageIndex >= 0 && removeImage(candidate, imageIndex)
+      : selectedImageId !== null && placeImage(candidate, selectedImageId, column, row, selectedImageRotation, selectedImageScale);
+    if (!changed) return;
+    if (!strokeChanged) { history.push(cloneMap(map)); if (history.length > 60) history.shift(); future = []; }
+    strokeChanged = true;
+    map = candidate;
+    if (imageMode === "place" && selectedImageId) {
+      selectedImagePlacementIndex = map.images.length - 1;
+    } else if (imageIndex >= 0 && selectedImagePlacementIndex !== null) {
+      if (selectedImagePlacementIndex === imageIndex) selectedImagePlacementIndex = null;
+      else if (selectedImagePlacementIndex > imageIndex) selectedImagePlacementIndex -= 1;
+      syncImageTransformControls();
+    }
+    render();
+    return;
+  }
   const candidate = cloneMap(map);
   const changed = selectedLayer === "ground" ? paintGround(candidate, column, row, erase ? "grass" : selectedGround) : placeProp(candidate, column, row, erase ? null : selectedProp);
   if (!changed) return;
@@ -663,6 +706,23 @@ function finishStroke(): void {
       }
     }
     movingProp = null;
+    render();
+  }
+  if (movingImage) {
+    const move = movingImage;
+    if (move.target) {
+      const candidate = cloneMap(map);
+      const changed = moveImage(candidate, move.index, move.target.column, move.target.row);
+      if (changed) {
+        history.push(cloneMap(map));
+        if (history.length > 60) history.shift();
+        future = [];
+        strokeChanged = true;
+        map = candidate;
+      }
+    }
+    selectedImagePlacementIndex = move.index;
+    movingImage = null;
     render();
   }
   if (strokeChanged) scheduleSave();
@@ -885,6 +945,13 @@ function cacheImageForMap(asset: ImageAsset): void {
   image.referrerPolicy = "no-referrer";
   image.src = asset.originalUrl;
   image.addEventListener("load", render);
+  image.addEventListener("error", () => {
+    const fallback = new Image();
+    fallback.referrerPolicy = "no-referrer";
+    fallback.src = asset.originalUrl;
+    fallback.addEventListener("load", render);
+    imageRenderImages.set(asset.id, fallback);
+  }, { once: true });
   imageRenderImages.set(asset.id, image);
 }
 function syncImageTransformControls(): void {
@@ -1443,6 +1510,7 @@ async function handleGoogleCredential(response: GoogleCredentialResponse): Promi
   try {
     saveAuthSession(await authClient.login(response.credential));
     renderProfile();
+    void refreshImageMaterials();
     document.querySelector<HTMLDialogElement>("#auth-dialog")?.close();
   } catch (error) {
     console.error("Google login failed", error);
@@ -1501,6 +1569,7 @@ async function initializeAuth(): Promise<void> {
         const verified = await authClient.me(restored.token);
         saveAuthSession({ token: restored.token, profile: verified.profile });
         renderProfile();
+        void refreshImageMaterials();
         return;
       } catch {
         saveAuthSession(null);
@@ -1581,6 +1650,45 @@ function setPropMode(mode: PropMode): void {
   canvas.classList.remove("prop-mode-place", "prop-mode-move", "prop-mode-erase");
   canvas.classList.add(`prop-mode-${mode}`);
 }
+const imageModeCopy: Record<PropMode, { label: string; hint: string }> = {
+  place: { label: "배치", hint: "이미지를 고른 뒤 맵을 클릭하면 배치합니다." },
+  move: { label: "이동", hint: "맵의 이미지를 클릭한 뒤 다른 칸으로 끌어 이동합니다." },
+  erase: { label: "지우기", hint: "맵의 이미지를 클릭하면 삭제합니다." },
+};
+function setImageMode(mode: PropMode): void {
+  imageMode = mode;
+  movingImage = null;
+  document.querySelectorAll<HTMLButtonElement>("[data-image-mode]").forEach((button) => {
+    const active = button.dataset.imageMode === mode;
+    button.classList.toggle("active", active);
+    button.setAttribute("aria-pressed", String(active));
+  });
+  const label = document.querySelector("#image-mode-label");
+  const hint = document.querySelector("#image-mode-hint");
+  if (label) label.textContent = imageModeCopy[mode].label;
+  if (hint) hint.textContent = imageModeCopy[mode].hint;
+  canvas.classList.remove("image-mode-place", "image-mode-move", "image-mode-erase");
+  canvas.classList.add(`image-mode-${mode}`);
+  render();
+}
+function applySelectedImageTransform(rotation: number, scale: number): void {
+  selectedImageRotation = ((rotation % 360) + 360) % 360;
+  selectedImageScale = Math.max(IMAGE_MIN_SCALE, Math.min(IMAGE_MAX_SCALE, scale));
+  if (selectedImagePlacementIndex !== null) {
+    const candidate = cloneMap(map);
+    if (updateImageTransform(candidate, selectedImagePlacementIndex, selectedImageRotation, selectedImageScale)) {
+      if (!imageTransformChanged) {
+        history.push(cloneMap(map));
+        if (history.length > 60) history.shift();
+        future = [];
+      }
+      imageTransformChanged = true;
+      map = candidate;
+      render();
+    }
+  }
+  syncImageTransformControls();
+}
 
 canvas.addEventListener("pointerdown", (event) => {
   if (event.button === 1 || (event.button === 0 && (panMode || spacePressed))) {
@@ -1603,6 +1711,21 @@ canvas.addEventListener("pointerdown", (event) => {
     render();
     return;
   }
+  if (selectedLayer === "image" && imageMode === "move") {
+    if (event.button !== 0) return;
+    const cell = getCell(event);
+    const index = cell ? getTopImageIndex(cell.column, cell.row) : -1;
+    if (!cell || index < 0) return;
+    event.preventDefault();
+    selectImagePlacement(index);
+    isDrawing = true;
+    strokeChanged = false;
+    lastPaintedCell = `${cell.column}:${cell.row}`;
+    movingImage = { index, fromColumn: cell.column, fromRow: cell.row, target: cell };
+    canvas.setPointerCapture(event.pointerId);
+    render();
+    return;
+  }
   if (event.button !== 0 && event.button !== 2) return;
   event.preventDefault(); isDrawing = true; canvas.setPointerCapture(event.pointerId); paintAt(event);
 });
@@ -1616,6 +1739,7 @@ canvas.addEventListener("pointerup", (event) => {
 });
 canvas.addEventListener("pointercancel", (event) => {
   movingProp = null;
+  movingImage = null;
   finishStroke();
   render();
   if (canvas.hasPointerCapture(event.pointerId)) canvas.releasePointerCapture(event.pointerId);
@@ -1632,9 +1756,14 @@ canvasScroll.addEventListener("wheel", (event) => {
 document.querySelectorAll<HTMLButtonElement>("[data-layer]").forEach((button) => button.addEventListener("click", () => {
   selectedLayer = button.dataset.layer as Layer;
   if (selectedLayer === "prop") setPropMode("place");
+  if (selectedLayer === "image") {
+    setImageMode("place");
+    void refreshImageMaterials();
+  }
   document.querySelectorAll("[data-layer]").forEach((item) => item.classList.toggle("active", item === button));
   document.querySelector("#ground-palette")!.classList.toggle("hidden", selectedLayer !== "ground");
   document.querySelector("#prop-palette")!.classList.toggle("hidden", selectedLayer !== "prop");
+  document.querySelector("#image-palette")!.classList.toggle("hidden", selectedLayer !== "image");
 }));
 document.querySelectorAll<HTMLButtonElement>("[data-ground]").forEach((button) => button.addEventListener("click", () => {
   selectedGround = button.dataset.ground as GroundType;
@@ -1648,6 +1777,28 @@ document.querySelectorAll<HTMLButtonElement>("[data-prop]").forEach((button) => 
 document.querySelectorAll<HTMLButtonElement>("[data-prop-mode]").forEach((button) => button.addEventListener("click", () => {
   setPropMode(button.dataset.propMode as PropMode);
 }));
+document.querySelectorAll<HTMLButtonElement>("[data-image-mode]").forEach((button) => button.addEventListener("click", () => {
+  setImageMode(button.dataset.imageMode as PropMode);
+}));
+document.querySelector<HTMLInputElement>("#image-rotation")!.addEventListener("input", (event) => {
+  applySelectedImageTransform(Number((event.target as HTMLInputElement).value), selectedImageScale);
+});
+document.querySelector<HTMLInputElement>("#image-rotation")!.addEventListener("change", () => {
+  imageTransformChanged = false;
+  scheduleSave();
+});
+document.querySelector<HTMLInputElement>("#image-scale")!.addEventListener("input", (event) => {
+  applySelectedImageTransform(selectedImageRotation, Number((event.target as HTMLInputElement).value) / 100);
+});
+document.querySelector<HTMLInputElement>("#image-scale")!.addEventListener("change", () => {
+  imageTransformChanged = false;
+  scheduleSave();
+});
+document.querySelector("#reset-image-transform")!.addEventListener("click", () => {
+  applySelectedImageTransform(0, 2);
+  imageTransformChanged = false;
+  scheduleSave();
+});
 document.querySelector("#map-name")!.addEventListener("input", (event) => {
   map.name = (event.target as HTMLInputElement).value || "이름 없는 지도"; map.updatedAt = new Date().toISOString(); scheduleSave();
 });
@@ -1768,6 +1919,14 @@ document.querySelector("#logout")!.addEventListener("click", async () => {
     console.error("Logout request failed", error);
   } finally {
     saveAuthSession(null);
+    imageAssets = [];
+    imageAssetsLoaded = false;
+    imageAssetsById.clear();
+    imageRenderImages.clear();
+    selectedImageId = null;
+    selectedImagePlacementIndex = null;
+    renderImageMaterials();
+    render();
     window.google?.accounts.id.disableAutoSelect();
     document.querySelector<HTMLDialogElement>("#profile-dialog")!.close();
     for (const id of ["#map-save-dialog", "#map-library-dialog"]) {
@@ -1782,6 +1941,9 @@ window.addEventListener("keydown", (event) => {
   if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === "z") { event.preventDefault(); event.shiftKey ? redo() : undo(); }
 });
 setPropMode(propMode);
+setImageMode(imageMode);
+syncImageTransformControls();
+renderImageMaterials();
 updateFullscreenButton();
 updateViewport();
 render();

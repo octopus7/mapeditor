@@ -416,3 +416,9 @@
 - Added live canvas preview while editing dimensions, showing retained map cells, blurred green growth areas, and blurred red cropped areas before applying.
 - Centralized resize offset calculation and added coverage for all nine anchor offsets.
 - Passed web checks (42), deployed Worker and Pages, and verified the production bundle and Worker health.
+
+## Add image materials to the map editor 2026-08-02 22:00:13 ~ 2026-08-02 22:05:34 (5분21초)
+
+- Added a third `이미지` material tab beside `타일` and `사물`, loading the authenticated user's saved image assets by their stable image hash.
+- Added image placement, movement, deletion, and persisted placement transforms for rotation and scale.
+- Added transform controls with live preview, automatic draft/map save integration, backward-compatible map deserialization, tests, Pages deployment, and live UI verification.

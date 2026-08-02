@@ -299,16 +299,19 @@ function normalizeImageScale(value: number): number {
 function parseImagePlacement(value: unknown, columns: number, rows: number): MapImagePlacement | null {
   if (!value || typeof value !== "object" || Array.isArray(value)) return null;
   const record = value as Partial<MapImagePlacement>;
+  const { column, row } = record;
   if (
     typeof record.imageId !== "string" ||
     !record.imageId.trim() ||
     record.imageId.length > 128 ||
-    !Number.isInteger(record.column) ||
-    !Number.isInteger(record.row) ||
-    record.column < 0 ||
-    record.row < 0 ||
-    record.column >= columns ||
-    record.row >= rows ||
+    typeof column !== "number" ||
+    !Number.isInteger(column) ||
+    typeof row !== "number" ||
+    !Number.isInteger(row) ||
+    column < 0 ||
+    row < 0 ||
+    column >= columns ||
+    row >= rows ||
     typeof record.rotation !== "number" ||
     !Number.isFinite(record.rotation) ||
     typeof record.scale !== "number" ||
@@ -317,8 +320,8 @@ function parseImagePlacement(value: unknown, columns: number, rows: number): Map
 
   return {
     imageId: record.imageId.trim(),
-    column: record.column,
-    row: record.row,
+    column,
+    row,
     rotation: normalizeRotation(record.rotation),
     scale: normalizeImageScale(record.scale),
   };

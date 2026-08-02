@@ -5,10 +5,14 @@ import {
   cloneMap,
   createInitialMap,
   deserializeMap,
+  moveImage,
   moveProp,
   paintGround,
+  placeImage,
   placeProp,
+  removeImage,
   serializeMap,
+  updateImageTransform,
 } from "../src/editor-model";
 
 describe("editor model", () => {
@@ -37,6 +41,23 @@ describe("editor model", () => {
     expect(map.cells[1 + map.columns].prop).toBe("boulder");
     expect(moveProp(map, 0, 0, 2, 2)).toBe(false);
     expect(moveProp(map, 1, 1, map.columns, 0)).toBe(false);
+  });
+
+  it("stores image hashes with movable and transformable placements", () => {
+    const map = createInitialMap();
+    expect(placeImage(map, "7c14a8e57ce7dcbdc1907e20f216d8c5c61390a08020ab66b52f0a9f832ee589", 2, 3, 450, 7)).toBe(true);
+    expect(map.images[0]).toMatchObject({
+      imageId: "7c14a8e57ce7dcbdc1907e20f216d8c5c61390a08020ab66b52f0a9f832ee589",
+      column: 2,
+      row: 3,
+      rotation: 90,
+      scale: 6,
+    });
+    expect(moveImage(map, 0, 4, 5)).toBe(true);
+    expect(updateImageTransform(map, 0, -90, 0.5)).toBe(true);
+    expect(map.images[0]).toMatchObject({ column: 4, row: 5, rotation: 270, scale: 0.5 });
+    expect(removeImage(map, 0)).toBe(true);
+    expect(map.images).toHaveLength(0);
   });
 
   it("clones and round-trips documents without shared cells", () => {
