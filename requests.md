@@ -390,3 +390,9 @@
 - Confirmed the frontend already renders the stored `thumbnailUrl` as `img.src` and the production D1 row already points to the correct `/t/<hash>` URL.
 - Verified the meme thumbnail endpoint returned HTTP 200 with `image/webp`; identified the actual cause as Pages CSP `img-src` excluding `https://meme.devtuna.win`.
 - Added the meme image origin to the Pages CSP, passed all static checks (39 tests), redeployed Pages, and verified the live CSP and thumbnail response.
+
+## Move my images to a standalone page 2026-08-02 21:43:17 ~ 2026-08-02 21:50:01 (6분 44초)
+
+- Replaced the image-library modal flow with a dedicated `/images/` page while preserving authenticated listing, upload, and developer error diagnostics.
+- Added a spacious responsive image grid, page navigation back to the editor, file upload controls, image count, and login-required handling.
+- Verified the standalone page locally and in the deployed Pages bundle; removed the obsolete modal-only style and verified the new hashed bundle after a cache-busting refresh.

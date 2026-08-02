@@ -188,7 +188,6 @@ dialog::backdrop { background: rgba(15, 28, 19, .78); backdrop-filter: blur(5px)
 .map-library-item strong { color: #38533f; font-size: 12px; }
 .map-library-item small { margin-top: 4px; color: #909991; font-size: 9px; }
 .map-library-item .button { flex: none; min-height: 31px; padding: 0 10px; }
-.image-library-dialog { width: min(92vw, 680px); }
 .image-upload-row { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 8px; align-items: center; }
 .image-upload-row input { min-width: 0; padding: 6px 8px; }
 .image-upload-row .button { min-height: 38px; }
