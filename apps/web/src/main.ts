@@ -14,6 +14,8 @@ import { getResizeOffsets, MAX_MAP_SIZE, MIN_MAP_SIZE, MapStorageClient, resizeM
 import { formatDeploymentTime, parseDeploymentMetadata } from "./deployment-meta";
 
 const CELL_SIZE = 36;
+const DEFAULT_IMAGE_ROTATION = 0;
+const DEFAULT_IMAGE_SCALE = 2;
 const STORAGE_KEY = "mapeditor-draft-v1";
 const AUTH_STORAGE_KEY = "mapeditor-auth-v3";
 const LEGACY_AUTH_STORAGE_KEY = "mapeditor-auth-v2";
@@ -71,8 +73,8 @@ let imageMode: PropMode = "place";
 let movingImage: MovingImage | null = null;
 let selectedImageId: string | null = null;
 let selectedImagePlacementIndex: number | null = null;
-let selectedImageRotation = 0;
-let selectedImageScale = 2;
+let selectedImageRotation = DEFAULT_IMAGE_ROTATION;
+let selectedImageScale = DEFAULT_IMAGE_SCALE;
 let imageTransformChanged = false;
 let lastPaintedCell = "";
 let history: MapDocument[] = [];
@@ -180,12 +182,6 @@ document.querySelector<HTMLDivElement>("#app")!.innerHTML = `
           <div class="section-label"><span>IMAGE MATERIALS</span><span id="image-material-count"></span></div>
           <p class="image-palette-message" id="image-palette-message">로그인하면 저장한 이미지를 재료로 사용할 수 있습니다.</p>
           <div class="image-material-grid" id="image-material-grid"></div>
-          <div class="image-transform-controls" aria-label="이미지 변환 설정">
-            <div class="section-label"><span>TRANSFORM</span><span id="image-transform-summary">0° · 200%</span></div>
-            <label class="range-control" for="image-rotation"><span>회전</span><output id="image-rotation-value">0°</output><input id="image-rotation" type="range" min="0" max="345" step="15" value="0" /></label>
-            <label class="range-control" for="image-scale"><span>스케일</span><output id="image-scale-value">200%</output><input id="image-scale" type="range" min="25" max="600" step="25" value="200" /></label>
-            <button class="button ghost image-transform-reset" type="button" id="reset-image-transform">변환 초기화</button>
-          </div>
           <div class="section-label"><span>EDIT MODE</span><span id="image-mode-label">배치</span></div>
           <div class="prop-mode-list" role="group" aria-label="이미지 편집 모드">
             <button class="prop-mode active" data-image-mode="place" aria-pressed="true">배치</button>
@@ -222,21 +218,22 @@ document.querySelector<HTMLDivElement>("#app")!.innerHTML = `
         <div class="stage-footer"><span><b id="map-size">28 × 18</b> 셀</span><span id="cursor-status">셀 위에 커서를 올려보세요</span><span class="footer-links"><span id="developer-access" class="developer-access">Developer: checking</span> · <span id="deployment-time" class="deployment-time">Deployment: checking</span> · 로컬 초안 · <button type="button" id="open-page-qr">page qr</button> · <a href="https://mapedit.pages.dev/cdn-cgi/trace" target="_blank" rel="noopener noreferrer">cdn trace</a> · <a href="https://github.com/octopus7/mapeditor" target="_blank" rel="noopener noreferrer">github</a></span></div>
       </section>
 
-      <aside class="reference-panel" aria-label="레이아웃 참고 이미지">
-        <div class="panel-heading"><span class="eyebrow">REFERENCE</span><h2>개울이 있는 숲</h2><p>레이아웃의 흐름과 오브젝트 밀도를 참고하세요.</p></div>
-        <button class="reference-image" id="open-reference" aria-label="참고 이미지 크게 보기">
-          <img src="/assets/forest-creek-reference.png" alt="위에서 본 개울과 나무다리가 있는 숲" /><span>이미지 크게 보기 ↗</span>
-        </button>
-        <div class="reference-notes"><h3>구성 힌트</h3><ul>
-          <li><i class="water-dot"></i><span><strong>개울</strong>지도 가장자리 사이를 끊김 없이 연결</span></li>
-          <li><i class="path-dot"></i><span><strong>동선</strong>흙길과 다리가 자연스럽게 만나도록 배치</span></li>
-          <li><i class="forest-dot"></i><span><strong>밀도</strong>중앙은 여유롭게, 외곽은 나무로 감싸기</span></li>
-        </ul></div>
-        <div class="reference-credit">AI로 생성한 레이아웃 참고 이미지</div>
+      <aside class="reference-panel" aria-label="이미지 상세 제어">
+        <div class="panel-heading"><span class="eyebrow">IMAGE DETAILS</span><h2 id="image-detail-title">이미지 상세 제어</h2><p id="image-detail-description">맵에 이미지를 배치하면 이 영역에서 정밀하게 조정할 수 있습니다.</p></div>
+        <div class="image-detail-empty" id="image-detail-empty">이미지를 배치하거나 이미지 이동 모드에서 대상을 선택해 주세요.</div>
+        <section class="image-detail-content hidden" id="image-detail-content" aria-label="선택 이미지 변환">
+          <div class="image-detail-preview"><img id="selected-image-preview" alt="" /><span id="selected-image-name"></span></div>
+          <div class="image-transform-controls" aria-label="이미지 변환 설정">
+            <div class="section-label"><span>TRANSFORM</span><span id="image-transform-summary">0° · 200%</span></div>
+            <label class="number-control" for="image-rotation"><span>회전</span><span class="number-input-wrap"><input id="image-rotation" type="number" min="0" max="345" step="15" value="0" /><b>°</b></span></label>
+            <label class="number-control" for="image-scale"><span>스케일</span><span class="number-input-wrap"><input id="image-scale" type="number" min="25" max="600" step="25" value="200" /><b>%</b></span></label>
+            <button class="button ghost image-transform-reset" type="button" id="reset-image-transform">기본값 복원</button>
+            <p class="image-detail-hint" id="image-detail-hint">회전 0° · 스케일 200%</p>
+          </div>
+        </section>
       </aside>
     </main>
   </div>
-  <dialog id="reference-dialog"><button id="close-reference" aria-label="닫기">×</button><img src="/assets/forest-creek-reference.png" alt="개울이 있는 숲 레이아웃 참고 이미지" /></dialog>
   <dialog id="page-qr-dialog" class="qr-dialog" aria-labelledby="page-qr-title">
     <strong id="page-qr-title">페이지 접속 QR 코드</strong>
     <img src="/assets/mapedit-page-qr.svg" alt="https://mapedit.pages.dev 접속 QR 코드" />
@@ -729,6 +726,7 @@ function paintAt(event: PointerEvent): void {
     map = candidate;
     if (imageMode === "place" && selectedImageId) {
       selectedImagePlacementIndex = map.images.length - 1;
+      syncImageTransformControls();
     } else if (imageIndex >= 0 && selectedImagePlacementIndex !== null) {
       if (selectedImagePlacementIndex === imageIndex) selectedImagePlacementIndex = null;
       else if (selectedImagePlacementIndex > imageIndex) selectedImagePlacementIndex -= 1;
@@ -782,6 +780,7 @@ function finishStroke(): void {
     }
     selectedImagePlacementIndex = move.index;
     movingImage = null;
+    syncImageTransformControls();
     render();
   }
   if (strokeChanged) scheduleSave();
@@ -1029,6 +1028,43 @@ function cacheImageForMap(asset: ImageAsset): void {
   }, { once: true });
   imageRenderImages.set(asset.id, image);
 }
+function renderImageDetails(): void {
+  const empty = document.querySelector<HTMLDivElement>("#image-detail-empty");
+  const content = document.querySelector<HTMLElement>("#image-detail-content");
+  const title = document.querySelector<HTMLHeadingElement>("#image-detail-title");
+  const description = document.querySelector<HTMLParagraphElement>("#image-detail-description");
+  const preview = document.querySelector<HTMLImageElement>("#selected-image-preview");
+  const name = document.querySelector<HTMLSpanElement>("#selected-image-name");
+  const hint = document.querySelector<HTMLParagraphElement>("#image-detail-hint");
+  if (!empty || !content || !title || !description || !preview || !name || !hint) return;
+
+  const placement = selectedImagePlacementIndex === null ? null : map.images[selectedImagePlacementIndex];
+  const imageId = placement?.imageId ?? selectedImageId;
+  const asset = imageId ? imageAssetsById.get(imageId) : undefined;
+  const hasContext = selectedLayer === "image" && Boolean(imageId);
+  empty.classList.toggle("hidden", hasContext);
+  content.classList.toggle("hidden", !hasContext);
+  if (!hasContext) return;
+
+  title.textContent = asset?.originalFilename ?? "배치 이미지";
+  description.textContent = placement
+    ? "선택한 이미지의 변환 값을 현재 문맥에서 조정합니다."
+    : "다음 이미지 배치에 적용할 변환 값을 준비합니다.";
+  if (asset) {
+    preview.src = asset.thumbnailUrl;
+    preview.alt = asset.originalFilename;
+    preview.classList.remove("hidden");
+    name.textContent = asset.originalFilename;
+  } else {
+    preview.removeAttribute("src");
+    preview.alt = "";
+    preview.classList.add("hidden");
+    name.textContent = "저장된 이미지 정보가 아직 없습니다.";
+  }
+  hint.textContent = placement
+    ? "값을 바꾸면 선택한 이미지에 즉시 적용됩니다."
+    : "배치 전에 설정한 값은 다음 이미지에 적용됩니다.";
+}
 function syncImageTransformControls(): void {
   const rotation = document.querySelector<HTMLInputElement>("#image-rotation");
   const scale = document.querySelector<HTMLInputElement>("#image-scale");
@@ -1048,6 +1084,7 @@ function syncImageTransformControls(): void {
   scale.disabled = disabled;
   const reset = document.querySelector<HTMLButtonElement>("#reset-image-transform");
   if (reset) reset.disabled = disabled;
+  renderImageDetails();
 }
 function renderImageMaterials(): void {
   const grid = document.querySelector<HTMLDivElement>("#image-material-grid");
@@ -1853,6 +1890,7 @@ document.querySelectorAll<HTMLButtonElement>("[data-layer]").forEach((button) =>
   document.querySelector("#ground-palette")!.classList.toggle("hidden", selectedLayer !== "ground");
   document.querySelector("#prop-palette")!.classList.toggle("hidden", selectedLayer !== "prop");
   document.querySelector("#image-palette")!.classList.toggle("hidden", selectedLayer !== "image");
+  renderImageDetails();
 }));
 document.querySelectorAll<HTMLButtonElement>("[data-ground]").forEach((button) => button.addEventListener("click", () => {
   selectedGround = button.dataset.ground as GroundType;
@@ -1884,7 +1922,7 @@ document.querySelector<HTMLInputElement>("#image-scale")!.addEventListener("chan
   scheduleSave();
 });
 document.querySelector("#reset-image-transform")!.addEventListener("click", () => {
-  applySelectedImageTransform(0, 2);
+  applySelectedImageTransform(DEFAULT_IMAGE_ROTATION, DEFAULT_IMAGE_SCALE);
   imageTransformChanged = false;
   scheduleSave();
 });
@@ -1962,10 +2000,6 @@ window.addEventListener("blur", () => {
   if (isPanning) finishStroke();
   updateViewport();
 });
-const dialog = document.querySelector<HTMLDialogElement>("#reference-dialog")!;
-document.querySelector("#open-reference")!.addEventListener("click", () => dialog.showModal());
-document.querySelector("#close-reference")!.addEventListener("click", () => dialog.close());
-dialog.addEventListener("click", (event) => { if (event.target === dialog) dialog.close(); });
 const pageQrDialog = document.querySelector<HTMLDialogElement>("#page-qr-dialog")!;
 document.querySelector("#open-page-qr")!.addEventListener("click", () => pageQrDialog.showModal());
 pageQrDialog.addEventListener("click", () => pageQrDialog.close());

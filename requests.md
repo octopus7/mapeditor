@@ -440,3 +440,9 @@
 - Limited the image-view action to the actual thumbnail while keeping the surrounding gray preview area and caption as card selection space.
 - Added an in-page original-image overlay that closes when the image or backdrop is clicked again.
 - Added a `새창으로 보기` action that opens the original in a new tab and closes the overlay, then passed checks, deployed Pages, and verified the live viewer controls.
+
+## Move image transform controls to detail panel 2026-08-02 22:14:00 ~ 2026-08-02 22:20:08 (6분 8초)
+
+- Removed the right-side AI reference image, enlargement action, and layout notes while keeping the reference-panel area for contextual editing.
+- Moved image transform controls into the right detail panel, showing the selected image preview, numeric rotation and scale inputs, current values, and a `기본값 복원` action for 0° and 200%.
+- Added empty and pre-placement states, synchronized the panel when selecting, placing, moving, or changing layers, passed all static checks with 44 tests, deployed Worker version `0f409b2d-0559-444e-b7c8-167c742b2cdf` and Pages preview `https://03640397.mapedit.pages.dev`, then verified the production bundle.

@@ -94,9 +94,15 @@ button:focus-visible, input:focus-visible, canvas:focus-visible { outline: 3px s
 .image-material-option img { display: block; width: 100%; aspect-ratio: 1; object-fit: contain; background: #e8ebe3; }
 .image-material-option span { display: block; overflow: hidden; padding: 5px 2px 2px; color: #566159; text-overflow: ellipsis; white-space: nowrap; font-size: 9px; }
 .image-transform-controls { margin-top: 11px; padding-top: 10px; border-top: 1px solid #e1e3da; }
-.range-control { display: grid; grid-template-columns: 1fr auto; gap: 4px 8px; align-items: center; margin: 7px 2px; color: #637067; font-size: 10px; }
-.range-control output { color: #38533f; font-size: 9px; font-weight: 700; }
-.range-control input { grid-column: 1 / -1; width: 100%; accent-color: #527859; }
+.number-control { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin: 10px 2px; color: #637067; font-size: 10px; }
+.number-input-wrap { display: inline-flex; align-items: center; gap: 5px; color: #38533f; font-size: 10px; font-weight: 700; }
+.number-input-wrap input { width: 82px; min-height: 31px; padding: 4px 7px; border: 1px solid #cdd2ca; border-radius: 6px; color: #38533f; background: #fff; text-align: right; font-size: 11px; font-weight: 700; }
+.number-input-wrap input:disabled { opacity: .55; cursor: not-allowed; }
+.image-detail-empty { margin-top: 20px; padding: 16px 13px; border: 1px dashed #ccd4ca; border-radius: 9px; color: #89938b; background: #f1f3ed; font-size: 10px; line-height: 1.55; }
+.image-detail-preview { display: grid; min-height: 150px; place-items: center; gap: 8px; margin: 19px 0 13px; padding: 13px; overflow: hidden; border: 1px solid #dfe3da; border-radius: 10px; background: #eef1ea; }
+.image-detail-preview img { display: block; width: auto; max-width: 100%; height: 132px; object-fit: contain; border-radius: 6px; background: #fff; }
+.image-detail-preview span { max-width: 100%; overflow: hidden; color: #67746b; font-size: 9px; text-overflow: ellipsis; white-space: nowrap; }
+.image-detail-hint { margin: 11px 2px 0; color: #8a948d; font-size: 9px; line-height: 1.45; }
 .image-transform-reset { width: 100%; min-height: 28px; margin-top: 7px; padding: 0 8px; font-size: 9px; }
 .image-transform-reset:disabled { opacity: .55; cursor: default; }
 .hidden { display: none; }
@@ -140,17 +146,8 @@ button:focus-visible, input:focus-visible, canvas:focus-visible { outline: 3px s
 body.fullscreen-fallback { overflow: hidden; }
 body.fullscreen-fallback .app-shell { min-height: 100dvh; }
 
-.reference-image { position: relative; width: 100%; aspect-ratio: 1; margin: 19px 0 18px; padding: 0; overflow: hidden; border: 0; border-radius: 11px; background: #dce3d5; cursor: zoom-in; box-shadow: 0 8px 22px rgba(36, 55, 41, .13); }
-.reference-image img { width: 100%; height: 100%; display: block; object-fit: cover; transition: transform .35s ease; }.reference-image:hover img { transform: scale(1.025); }
-.reference-image span { position: absolute; right: 9px; bottom: 9px; padding: 6px 8px; border-radius: 6px; color: #fff; background: rgba(24, 42, 29, .78); font-size: 9px; }
-.reference-notes { padding-top: 2px; }.reference-notes h3 { margin: 0 0 12px; color: #6e7a71; font-size: 10px; letter-spacing: .08em; }
-.reference-notes ul { display: grid; gap: 12px; margin: 0; padding: 0; list-style: none; }.reference-notes li { display: grid; grid-template-columns: 9px 1fr; gap: 9px; align-items: start; }
-.reference-notes li i { width: 7px; height: 7px; margin-top: 3px; border-radius: 50%; }.water-dot { background: #438a9a; }.path-dot { background: #aa7c4b; }.forest-dot { background: #557f50; }
-.reference-notes strong, .reference-notes span { display: block; }.reference-notes strong { color: #405248; font-size: 10px; }.reference-notes span { color: #8a918c; font-size: 9px; line-height: 1.45; }
-.reference-credit { margin-top: 21px; padding-top: 13px; border-top: 1px solid #dedfd7; color: #a2a7a3; font-size: 8px; }
 dialog { max-width: min(88vw, 900px); padding: 7px; border: 0; border-radius: 12px; background: #f7f6ee; box-shadow: 0 35px 80px rgba(10, 20, 13, .45); }
 dialog::backdrop { background: rgba(15, 28, 19, .78); backdrop-filter: blur(5px); }dialog img { display: block; max-width: 100%; max-height: 84vh; border-radius: 8px; }
-#reference-dialog > button { position: absolute; top: 14px; right: 14px; width: 34px; height: 34px; border: 0; border-radius: 50%; color: #fff; background: rgba(21, 34, 25, .72); cursor: pointer; font-size: 22px; line-height: 1; }
 .qr-dialog { width: min(88vw, 420px); padding: 20px; cursor: pointer; text-align: center; }
 .qr-dialog strong, .qr-dialog span { display: block; }.qr-dialog strong { margin-bottom: 14px; color: #334a3a; font-size: 15px; }
 .qr-dialog img { width: min(72vw, 360px); height: auto; margin: 0 auto; border: 1px solid #e2e3db; border-radius: 6px; background: #fff; }
