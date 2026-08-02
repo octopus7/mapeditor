@@ -5,6 +5,7 @@ import {
   cloneMap,
   createInitialMap,
   deserializeMap,
+  moveProp,
   paintGround,
   placeProp,
   serializeMap,
@@ -26,6 +27,16 @@ describe("editor model", () => {
     expect(placeProp(map, 0, 0, "shrub")).toBe(true);
     expect(paintGround(map, -1, 0, "water")).toBe(false);
     expect(placeProp(map, map.columns, 0, "boulder")).toBe(false);
+  });
+
+  it("moves a prop to another cell and overwrites the destination prop", () => {
+    const map = createInitialMap();
+    expect(placeProp(map, 0, 0, "boulder")).toBe(true);
+    expect(moveProp(map, 0, 0, 1, 1)).toBe(true);
+    expect(map.cells[0].prop).toBeNull();
+    expect(map.cells[1 + map.columns].prop).toBe("boulder");
+    expect(moveProp(map, 0, 0, 2, 2)).toBe(false);
+    expect(moveProp(map, 1, 1, map.columns, 0)).toBe(false);
   });
 
   it("clones and round-trips documents without shared cells", () => {

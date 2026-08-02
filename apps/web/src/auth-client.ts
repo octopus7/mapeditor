@@ -1,7 +1,11 @@
+export const AVATAR_ICONS = ["initial", "hidden", "leaf", "pine", "water", "stone"] as const;
+export type AvatarIcon = typeof AVATAR_ICONS[number];
+
 export interface AuthProfile {
   id: string;
   email: string;
   displayName: string;
+  avatarIcon: AvatarIcon;
 }
 
 export interface AuthSession {
@@ -47,11 +51,15 @@ export class AuthClient {
     return this.request("/auth/me", { headers: this.authHeaders(token) });
   }
 
-  async updateProfile(token: string, displayName: string): Promise<{ profile: AuthProfile }> {
+  async updateProfile(
+    token: string,
+    displayName: string,
+    avatarIcon: AvatarIcon,
+  ): Promise<{ profile: AuthProfile }> {
     return this.request("/auth/profile", {
       method: "PUT",
       headers: this.authHeaders(token),
-      body: JSON.stringify({ displayName }),
+      body: JSON.stringify({ displayName, avatarIcon }),
     });
   }
 
@@ -85,6 +93,10 @@ export class AuthClient {
     if (response.status === 204) return undefined as T;
     return response.json() as Promise<T>;
   }
+}
+
+export function isAvatarIcon(value: unknown): value is AvatarIcon {
+  return typeof value === "string" && AVATAR_ICONS.includes(value as AvatarIcon);
 }
 
 export function normalizeApiBaseUrl(value: unknown): string {

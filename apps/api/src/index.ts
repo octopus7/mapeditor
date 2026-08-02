@@ -8,11 +8,14 @@ const MAX_BODY_BYTES = 20_000;
 const MAX_CREDENTIAL_BYTES = 10_000;
 const MAX_DISPLAY_NAME_LENGTH = 40;
 export const DEFAULT_DISPLAY_NAME = "새유저";
+export const AVATAR_ICONS = ["initial", "hidden", "leaf", "pine", "water", "stone"] as const;
+export type AvatarIcon = typeof AVATAR_ICONS[number];
 
 export interface Profile {
   id: string;
   email: string;
   displayName: string;
+  avatarIcon: AvatarIcon;
 }
 
 export interface GoogleIdentity {
@@ -23,7 +26,7 @@ export interface GoogleIdentity {
 export interface UserRepository {
   findById(id: string): Promise<Profile | null>;
   saveGoogleLogin(identity: GoogleIdentity): Promise<Profile>;
-  updateDisplayName(id: string, displayName: string): Promise<Profile | null>;
+  updateProfile(id: string, displayName: string, avatarIcon: AvatarIcon): Promise<Profile | null>;
 }
 
 interface Dependencies {
@@ -37,12 +40,14 @@ interface GoogleCredentialBody {
 
 interface ProfileUpdateBody {
   displayName?: unknown;
+  avatarIcon?: unknown;
 }
 
 interface UserRow {
   id: string;
   email: string;
   display_name: string;
+  avatar_icon: AvatarIcon;
 }
 
 class ApiError extends Error {
@@ -60,7 +65,7 @@ class D1UserRepository implements UserRepository {
 
   async findById(id: string): Promise<Profile | null> {
     const row = await this.database
-      .prepare("SELECT id, email, display_name FROM users WHERE id = ?1")
+      .prepare("SELECT id, email, display_name, avatar_icon FROM users WHERE id = ?1")
       .bind(id)
       .first<UserRow>();
     return row ? profileFromRow(row) : null;
@@ -74,7 +79,7 @@ class D1UserRepository implements UserRepository {
          ON CONFLICT (google_subject) DO UPDATE SET
            email = excluded.email,
            last_login_at = CURRENT_TIMESTAMP
-         RETURNING id, email, display_name`,
+         RETURNING id, email, display_name, avatar_icon`,
       )
       .bind(
         crypto.randomUUID(),
@@ -90,22 +95,31 @@ class D1UserRepository implements UserRepository {
     return profileFromRow(row);
   }
 
-  async updateDisplayName(id: string, displayName: string): Promise<Profile | null> {
+  async updateProfile(
+    id: string,
+    displayName: string,
+    avatarIcon: AvatarIcon,
+  ): Promise<Profile | null> {
     const row = await this.database
       .prepare(
         `UPDATE users
-         SET display_name = ?1, updated_at = CURRENT_TIMESTAMP
-         WHERE id = ?2
-         RETURNING id, email, display_name`,
+         SET display_name = ?1, avatar_icon = ?2, updated_at = CURRENT_TIMESTAMP
+         WHERE id = ?3
+         RETURNING id, email, display_name, avatar_icon`,
       )
-      .bind(displayName, id)
+      .bind(displayName, avatarIcon, id)
       .first<UserRow>();
     return row ? profileFromRow(row) : null;
   }
 }
 
 function profileFromRow(row: UserRow): Profile {
-  return { id: row.id, email: row.email, displayName: row.display_name };
+  return {
+    id: row.id,
+    email: row.email,
+    displayName: row.display_name,
+    avatarIcon: row.avatar_icon,
+  };
 }
 
 export function parseAllowedOrigins(value: string): Set<string> {
@@ -137,6 +151,13 @@ export function validateDisplayName(value: unknown): string {
     throw new ApiError(400, "INVALID_DISPLAY_NAME", "표시 이름에 제어 문자를 사용할 수 없습니다.");
   }
   return normalized;
+}
+
+export function validateAvatarIcon(value: unknown): AvatarIcon {
+  if (typeof value !== "string" || !AVATAR_ICONS.includes(value as AvatarIcon)) {
+    throw new ApiError(400, "INVALID_AVATAR_ICON", "프로필 아이콘 설정이 올바르지 않습니다.");
+  }
+  return value as AvatarIcon;
 }
 
 type CorsHeaders = Record<string, string>;
@@ -310,9 +331,10 @@ async function route(
   if (request.method === "PUT" && url.pathname === "/auth/profile") {
     const currentProfile = await requireProfile(request, env, users);
     const body = await readJson<ProfileUpdateBody>(request);
-    const profile = await users.updateDisplayName(
+    const profile = await users.updateProfile(
       currentProfile.id,
       validateDisplayName(body.displayName),
+      validateAvatarIcon(body.avatarIcon),
     );
     if (!profile) {
       throw new ApiError(401, "INVALID_SESSION", "로그인 계정을 찾을 수 없습니다.");

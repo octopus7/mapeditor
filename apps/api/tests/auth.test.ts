@@ -3,7 +3,9 @@ import {
   createApiHandler,
   DEFAULT_DISPLAY_NAME,
   parseAllowedOrigins,
+  validateAvatarIcon,
   validateDisplayName,
+  type AvatarIcon,
   type GoogleIdentity,
   type Profile,
   type UserRepository,
@@ -35,16 +37,21 @@ class InMemoryUserRepository implements UserRepository {
       id: `user-${this.profiles.size + 1}`,
       email: identity.email,
       displayName: DEFAULT_DISPLAY_NAME,
+      avatarIcon: "initial" as const,
     };
     this.subjects.set(identity.subject, profile.id);
     this.profiles.set(profile.id, profile);
     return profile;
   }
 
-  async updateDisplayName(id: string, displayName: string): Promise<Profile | null> {
+  async updateProfile(
+    id: string,
+    displayName: string,
+    avatarIcon: AvatarIcon,
+  ): Promise<Profile | null> {
     const existing = this.profiles.get(id);
     if (!existing) return null;
-    const profile = { ...existing, displayName };
+    const profile = { ...existing, displayName, avatarIcon };
     this.profiles.set(id, profile);
     return profile;
   }
@@ -99,6 +106,12 @@ describe("authentication helpers", () => {
     expect(validateDisplayName("🌲".repeat(40))).toBe("🌲".repeat(40));
   });
 
+  it("accepts only supported avatar icons", () => {
+    expect(validateAvatarIcon("leaf")).toBe("leaf");
+    expect(validateAvatarIcon("hidden")).toBe("hidden");
+    expect(() => validateAvatarIcon("google-photo")).toThrow();
+  });
+
   it("parses the exact CORS allow list", () => {
     const origins = parseAllowedOrigins(`${ALLOWED_ORIGIN}, http://localhost:4173`);
     expect(origins.has(ALLOWED_ORIGIN)).toBe(true);
@@ -115,6 +128,7 @@ describe("authentication API", () => {
       id: "user-1",
       email: "editor@example.com",
       displayName: "새유저",
+      avatarIcon: "initial",
     });
     expect(session.token.split(".")).toHaveLength(3);
 
@@ -136,14 +150,14 @@ describe("authentication API", () => {
           "Content-Type": "application/json",
           Origin: ALLOWED_ORIGIN,
         },
-        body: JSON.stringify({ displayName: "  새   이름  " }),
+        body: JSON.stringify({ displayName: "  새   이름  ", avatarIcon: "leaf" }),
       }),
       env as Env,
       {} as ExecutionContext,
     );
     expect(updateResponse.status).toBe(200);
     expect(await updateResponse.json()).toEqual({
-      profile: { ...session.profile, displayName: "새 이름" },
+      profile: { ...session.profile, displayName: "새 이름", avatarIcon: "leaf" },
     });
   });
 
@@ -157,7 +171,7 @@ describe("authentication API", () => {
           Authorization: `Bearer ${firstSession.token}`,
           "Content-Type": "application/json",
         },
-        body: JSON.stringify({ displayName: "내가 정한 이름" }),
+        body: JSON.stringify({ displayName: "내가 정한 이름", avatarIcon: "hidden" }),
       }),
       env as Env,
       {} as ExecutionContext,
@@ -165,6 +179,7 @@ describe("authentication API", () => {
 
     const secondSession = await login(handler, env);
     expect(secondSession.profile.displayName).toBe("내가 정한 이름");
+    expect(secondSession.profile.avatarIcon).toBe("hidden");
     expect(secondSession.profile.id).toBe(firstSession.profile.id);
   });
 

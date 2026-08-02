@@ -38,7 +38,7 @@ describe("AuthClient", () => {
   it("exchanges a Google credential for an app session", async () => {
     const fetchMock = vi.fn().mockResolvedValue(new Response(JSON.stringify({
       token: "session-token",
-      profile: { id: "user-1", email: "user@example.com", displayName: "숲지기" },
+      profile: { id: "user-1", email: "user@example.com", displayName: "숲지기", avatarIcon: "pine" },
     }), { status: 200, headers: { "Content-Type": "application/json" } }));
     vi.stubGlobal("fetch", fetchMock);
 
@@ -53,15 +53,15 @@ describe("AuthClient", () => {
 
   it("updates only the signed-in user's display name", async () => {
     const fetchMock = vi.fn().mockResolvedValue(new Response(JSON.stringify({
-      profile: { id: "user-1", email: "user@example.com", displayName: "새 이름" },
+      profile: { id: "user-1", email: "user@example.com", displayName: "새 이름", avatarIcon: "hidden" },
     }), { status: 200, headers: { "Content-Type": "application/json" } }));
     vi.stubGlobal("fetch", fetchMock);
 
-    await new AuthClient("https://api.example.com").updateProfile("session-token", "새 이름");
+    await new AuthClient("https://api.example.com").updateProfile("session-token", "새 이름", "hidden");
 
     const [, init] = fetchMock.mock.calls[0] as [string, RequestInit];
     expect(init.method).toBe("PUT");
-    expect(init.body).toBe(JSON.stringify({ displayName: "새 이름" }));
+    expect(init.body).toBe(JSON.stringify({ displayName: "새 이름", avatarIcon: "hidden" }));
     expect(new Headers(init.headers).get("Authorization")).toBe("Bearer session-token");
   });
 
@@ -78,7 +78,7 @@ describe("AuthClient", () => {
       error: { code: "INVALID_NAME", message: "표시 이름이 올바르지 않습니다." },
     }), { status: 400, headers: { "Content-Type": "application/json" } })));
 
-    const request = new AuthClient("https://api.example.com").updateProfile("session-token", "");
+    const request = new AuthClient("https://api.example.com").updateProfile("session-token", "", "initial");
     await expect(request).rejects.toBeInstanceOf(AuthApiError);
     await expect(request).rejects.toEqual(expect.objectContaining({
       status: 400,

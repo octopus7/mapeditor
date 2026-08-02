@@ -70,6 +70,26 @@ export function placeProp(
   return true;
 }
 
+export function moveProp(
+  map: MapDocument,
+  fromColumn: number,
+  fromRow: number,
+  toColumn: number,
+  toRow: number,
+): boolean {
+  if (!isInside(map, fromColumn, fromRow) || !isInside(map, toColumn, toRow)) return false;
+  if (fromColumn === toColumn && fromRow === toRow) return false;
+
+  const source = map.cells[cellIndex(map, fromColumn, fromRow)];
+  if (!source.prop) return false;
+
+  const target = map.cells[cellIndex(map, toColumn, toRow)];
+  target.prop = source.prop;
+  source.prop = null;
+  map.updatedAt = new Date().toISOString();
+  return true;
+}
+
 export function clearGround(map: MapDocument): MapDocument {
   return {
     ...map,

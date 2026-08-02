@@ -8,9 +8,9 @@
 |---|---|---|---|
 | Cloudflare Pages | `mapedit` / `https://mapedit.pages.dev` | 정적 맵 편집 UI와 공개 이미지 제공 | 로컬 빌드 후 Wrangler Direct Upload |
 | Cloudflare Worker API | `mapeditor-api` | Google 로그인 검증, 서비스 세션과 프로필 API 제공, D1 접근 | Wrangler Worker 배포 |
-| Cloudflare D1 | `mapeditor-db` | 인증 사용자와 프로필 이름 저장, 향후 맵·청크 payload 저장 | Wrangler 마이그레이션 |
+| Cloudflare D1 | `mapeditor-db` | 인증 사용자와 프로필 이름·아이콘 설정 저장, 향후 맵·청크 payload 저장 | Wrangler 마이그레이션 |
 
-Pages는 D1에 직접 접근하지 않는다. 브라우저는 `mapeditor-api`의 공개 HTTPS API만 호출하고, Worker만 D1 바인딩을 통해 데이터에 접근한다. 현재 D1에는 로그인 사용자의 계정 식별 정보와 사용자가 변경한 표시 이름만 저장하며 맵 작업 데이터는 아직 저장하지 않는다.
+Pages는 D1에 직접 접근하지 않는다. 브라우저는 `mapeditor-api`의 공개 HTTPS API만 호출하고, Worker만 D1 바인딩을 통해 데이터에 접근한다. 현재 D1에는 로그인 사용자의 계정 식별 정보와 사용자가 변경한 표시 이름·아이콘 설정만 저장하며 맵 작업 데이터는 아직 저장하지 않는다.
 
 ```mermaid
 flowchart LR
@@ -28,7 +28,7 @@ flowchart LR
 3. Pages는 ID 토큰을 `mapeditor-api`의 `POST /auth/google`로 전달한다.
 4. Worker는 토큰의 서명, issuer, audience, 만료 시간을 검증한다. audience는 등록한 Google OAuth Client ID와 일치해야 한다.
 5. Worker는 Google 계정 식별자를 기준으로 D1 사용자 레코드를 생성하거나 조회하고 서비스 세션을 발급한다. 신규 사용자의 초기 표시 이름은 Google 이름이나 이메일을 사용하지 않고 `새유저`로 저장한다.
-6. 로그인 사용자가 계정 설정에서 표시 이름을 바꾸면 Worker API가 해당 이름을 검증하여 D1에 저장한다. 이메일은 일반 페이지에 표시하지 않고 사용자가 프로필 버튼을 눌러 연 계정 정보 창에서만 보여 준다.
+6. 로그인 사용자가 계정 설정에서 표시 이름이나 아이콘을 바꾸면 Worker API가 값을 검증하여 D1에 저장한다. 아이콘은 기본 글자, 숨김, 나뭇잎, 소나무, 물방울, 바위 중에서 고를 수 있다. 이메일은 일반 페이지에 표시하지 않고 사용자가 프로필 버튼을 눌러 연 계정 정보 창에서만 보여 준다.
 
 이 구성은 OAuth authorization code를 받는 리다이렉트 방식이 아니다. 따라서 Google Cloud Console의 `Authorized redirect URIs`는 비워 두고 `login_uri`도 설정하지 않는다. 팝업 완료 후 별도의 되돌아오기 URL로 이동하지 않으며, 현재 Pages 문서의 JavaScript 콜백이 ID 토큰을 받는다.
 
@@ -70,7 +70,7 @@ Worker 배포 주소가 확정되면 Pages의 API 기본 주소와 Worker의 COR
 - 스키마 변경은 `database/migrations`의 순서가 있는 SQL 파일로 관리한다.
 - 새 마이그레이션은 로컬 D1에서 검증한 뒤 원격 D1에 적용한다.
 - 애플리케이션 시크릿이나 Google ID 토큰 원문을 저장하지 않는다.
-- 현재는 인증 사용자와 변경 가능한 표시 이름만 저장한다.
+- 현재는 인증 사용자와 변경 가능한 표시 이름·프로필 아이콘 설정만 저장한다.
 - 향후 맵 저장을 도입하면 개별 셀 단위가 아니라 청크 payload 단위로 저장한다.
 
 ## 시크릿 경계

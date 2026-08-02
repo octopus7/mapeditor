@@ -1,14 +1,25 @@
 import "./styles.css";
 import {
-  cellIndex, cloneMap, createInitialMap, deserializeMap, paintGround, placeProp, serializeMap,
+  cellIndex, cloneMap, createInitialMap, deserializeMap, moveProp, paintGround, placeProp, serializeMap,
   type GroundType, type MapDocument, type PropType,
 } from "./editor-model";
-import { AuthClient, parsePublicAppConfig, type AuthSession } from "./auth-client";
+import {
+  AuthClient, isAvatarIcon, parsePublicAppConfig,
+  type AuthSession, type AvatarIcon,
+} from "./auth-client";
 
 const CELL_SIZE = 36;
 const STORAGE_KEY = "mapeditor-draft-v1";
 const AUTH_STORAGE_KEY = "mapeditor-auth-v2";
 const DEFAULT_DISPLAY_NAME = "새유저";
+const avatarOptions: Array<{ id: AvatarIcon; label: string; glyph: string }> = [
+  { id: "initial", label: "글자", glyph: "가" },
+  { id: "hidden", label: "숨김", glyph: "—" },
+  { id: "leaf", label: "나뭇잎", glyph: "🌿" },
+  { id: "pine", label: "소나무", glyph: "🌲" },
+  { id: "water", label: "물방울", glyph: "💧" },
+  { id: "stone", label: "바위", glyph: "🪨" },
+];
 const groundOptions: Array<{ id: GroundType; label: string; hint: string }> = [
   { id: "grass", label: "풀", hint: "부드러운 초지" },
   { id: "dirt", label: "흙", hint: "산책로와 둔덕" },
@@ -24,6 +35,14 @@ const propOptions: Array<{ id: PropType; label: string; image: string }> = [
   { id: "footbridge", label: "나무다리", image: "/assets/props/footbridge.png" },
 ];
 type Layer = "ground" | "prop";
+type PropMode = "place" | "move" | "erase";
+type CellPosition = { column: number; row: number };
+type MovingProp = {
+  prop: PropType;
+  fromColumn: number;
+  fromRow: number;
+  target: CellPosition | null;
+};
 
 let map = restoreDraft() ?? createInitialMap();
 let selectedLayer: Layer = "ground";
@@ -32,7 +51,8 @@ let selectedProp: PropType = "broadleaf-tree";
 let gridVisible = true;
 let isDrawing = false;
 let strokeChanged = false;
-let eraseMode = false;
+let propMode: PropMode = "place";
+let movingProp: MovingProp | null = null;
 let lastPaintedCell = "";
 let history: MapDocument[] = [];
 let future: MapDocument[] = [];
@@ -41,6 +61,8 @@ let authClient: AuthClient | null = null;
 let authSession: AuthSession | null = null;
 let googleClientId = "";
 let googleIdentityLoadPromise: Promise<void> | null = null;
+let fileMenuOpen = false;
+let pendingAvatarIcon: AvatarIcon = "initial";
 
 document.querySelector<HTMLDivElement>("#app")!.innerHTML = `
   <div class="app-shell">
@@ -57,8 +79,14 @@ document.querySelector<HTMLDivElement>("#app")!.innerHTML = `
         <div class="auth-slot" id="auth-slot"><span class="auth-note">로그인 준비 중</span></div>
         <button class="button ghost" id="undo" title="실행 취소 (Ctrl+Z)">↶ <span>실행 취소</span></button>
         <button class="button ghost" id="redo" title="다시 실행 (Ctrl+Shift+Z)">↷</button>
-        <button class="button export" id="export-json">JSON 저장</button>
-        <button class="button primary" id="export-png">PNG 내보내기</button>
+        <div class="file-menu-wrap">
+          <button class="icon-button file-menu-toggle" id="file-menu-toggle" aria-expanded="false" aria-controls="file-menu" aria-haspopup="menu" title="파일 메뉴">☰</button>
+          <div class="file-menu hidden" id="file-menu" role="menu" aria-label="파일 기능">
+            <span class="file-menu-heading">파일 내보내기</span>
+            <button class="button export" id="export-json" role="menuitem">JSON 저장</button>
+            <button class="button primary" id="export-png" role="menuitem">PNG 내보내기</button>
+          </div>
+        </div>
       </div>
     </header>
 
@@ -80,6 +108,13 @@ document.querySelector<HTMLDivElement>("#app")!.innerHTML = `
           </div>
         </section>
         <section class="palette-section hidden" id="prop-palette">
+          <div class="section-label"><span>EDIT MODE</span><span id="prop-mode-label">배치</span></div>
+          <div class="prop-mode-list" role="group" aria-label="사물 편집 모드">
+            <button class="prop-mode active" data-prop-mode="place" aria-pressed="true">배치</button>
+            <button class="prop-mode" data-prop-mode="move" aria-pressed="false">이동</button>
+            <button class="prop-mode" data-prop-mode="erase" aria-pressed="false">지우개</button>
+          </div>
+          <p class="prop-mode-hint" id="prop-mode-hint">사물을 누른 채 움직여 연속으로 배치합니다.</p>
           <div class="section-label"><span>OBJECTS</span><span>6종</span></div>
           <div class="prop-grid">
             ${propOptions.map((item, index) => `
@@ -87,9 +122,8 @@ document.querySelector<HTMLDivElement>("#app")!.innerHTML = `
                 <img src="${item.image}" alt="" /><span>${item.label}</span>
               </button>`).join("")}
           </div>
-          <button class="eraser" id="eraser">⌫ 사물 지우개 끄기</button>
         </section>
-        <div class="tool-tip"><span>TIP</span> 누른 채 움직이면 연속으로 칠할 수 있어요. 오른쪽 클릭은 현재 레이어를 지웁니다.</div>
+        <div class="tool-tip"><span>TIP</span> 사물은 배치·이동·지우개 모드로 편집합니다. 바닥 타일에서는 오른쪽 클릭으로 지울 수 있어요.</div>
       </aside>
 
       <section class="canvas-stage" aria-label="지도 편집 영역">
@@ -132,8 +166,14 @@ document.querySelector<HTMLDivElement>("#app")!.innerHTML = `
       <div class="profile-heading"><span class="profile-avatar" id="profile-avatar">?</span><div><small>Google 계정</small><strong id="profile-email"></strong></div></div>
       <label for="profile-name">표시 이름</label>
       <input id="profile-name" maxlength="40" autocomplete="nickname" />
-      <p class="profile-message" id="profile-message">변경한 이름은 계정 설정에 저장됩니다.</p>
-      <div class="profile-actions"><button class="button ghost" value="cancel">닫기</button><button class="button danger" type="button" id="logout">로그아웃</button><button class="button primary" type="button" id="save-profile">이름 저장</button></div>
+      <fieldset class="avatar-settings">
+        <legend>프로필 아이콘</legend>
+        <div class="avatar-options" aria-label="프로필 아이콘 선택">
+          ${avatarOptions.map((option) => `<button type="button" data-avatar-icon="${option.id}" aria-pressed="false" title="${option.label}"><span aria-hidden="true">${option.glyph}</span><small>${option.label}</small></button>`).join("")}
+        </div>
+      </fieldset>
+      <p class="profile-message" id="profile-message">변경한 이름과 아이콘은 계정 설정에 저장됩니다.</p>
+      <div class="profile-actions"><button class="button ghost" value="cancel">닫기</button><button class="button danger" type="button" id="logout">로그아웃</button><button class="button primary" type="button" id="save-profile">설정 저장</button></div>
     </form>
   </dialog>
 `;
@@ -189,6 +229,15 @@ function drawGround(column: number, row: number, ground: GroundType): void {
 const propScale: Record<PropType, number> = {
   "broadleaf-tree": 2.15, "pine-tree": 2.05, shrub: 1.25, boulder: 1.35, "fallen-log": 1.65, footbridge: 1.65,
 };
+function drawProp(column: number, row: number, prop: PropType, opacity = 1): void {
+  const image = propImages.get(prop);
+  if (!image?.complete) return;
+  const size = CELL_SIZE * propScale[prop];
+  context.save();
+  context.globalAlpha = opacity;
+  context.drawImage(image, column * CELL_SIZE + CELL_SIZE / 2 - size / 2, row * CELL_SIZE + CELL_SIZE - size * 0.78, size, size);
+  context.restore();
+}
 function render(): void {
   context.clearRect(0, 0, canvas.width, canvas.height);
   for (let row = 0; row < map.rows; row += 1) for (let column = 0; column < map.columns; column += 1) {
@@ -197,10 +246,11 @@ function render(): void {
   for (let row = 0; row < map.rows; row += 1) for (let column = 0; column < map.columns; column += 1) {
     const prop = map.cells[cellIndex(map, column, row)].prop;
     if (!prop) continue;
-    const image = propImages.get(prop);
-    if (!image?.complete) continue;
-    const size = CELL_SIZE * propScale[prop];
-    context.drawImage(image, column * CELL_SIZE + CELL_SIZE / 2 - size / 2, row * CELL_SIZE + CELL_SIZE - size * 0.78, size, size);
+    if (movingProp && movingProp.fromColumn === column && movingProp.fromRow === row) continue;
+    drawProp(column, row, prop);
+  }
+  if (movingProp?.target) {
+    drawProp(movingProp.target.column, movingProp.target.row, movingProp.prop, .62);
   }
   if (gridVisible) {
     context.save(); context.strokeStyle = "rgba(21,45,29,.17)"; context.lineWidth = 1; context.beginPath();
@@ -210,18 +260,32 @@ function render(): void {
   }
   updateHistoryButtons();
 }
-function getCell(event: PointerEvent): { column: number; row: number } {
+function getCell(event: PointerEvent): CellPosition | null {
   const rect = canvas.getBoundingClientRect();
+  if (event.clientX < rect.left || event.clientX >= rect.right || event.clientY < rect.top || event.clientY >= rect.bottom) return null;
   return { column: Math.floor(((event.clientX - rect.left) / rect.width) * map.columns), row: Math.floor(((event.clientY - rect.top) / rect.height) * map.rows) };
 }
 function paintAt(event: PointerEvent): void {
-  const { column, row } = getCell(event);
-  const key = `${column}:${row}`;
+  const cell = getCell(event);
+  const key = cell ? `${cell.column}:${cell.row}` : "outside";
   if (key === lastPaintedCell) return;
   lastPaintedCell = key;
+  if (!cell) {
+    if (movingProp) {
+      movingProp.target = null;
+      render();
+    }
+    return;
+  }
+  const { column, row } = cell;
   document.querySelector("#cursor-status")!.textContent = `열 ${column + 1} · 행 ${row + 1}`;
   if (!isDrawing) return;
-  const erase = eraseMode || event.button === 2 || (event.buttons & 2) === 2;
+  if (selectedLayer === "prop" && propMode === "move" && movingProp) {
+    movingProp.target = cell;
+    render();
+    return;
+  }
+  const erase = (selectedLayer === "prop" && propMode === "erase") || event.button === 2 || (event.buttons & 2) === 2;
   const candidate = cloneMap(map);
   const changed = selectedLayer === "ground" ? paintGround(candidate, column, row, erase ? "grass" : selectedGround) : placeProp(candidate, column, row, erase ? null : selectedProp);
   if (!changed) return;
@@ -229,6 +293,22 @@ function paintAt(event: PointerEvent): void {
   strokeChanged = true; map = candidate; render();
 }
 function finishStroke(): void {
+  if (movingProp) {
+    const move = movingProp;
+    if (move.target) {
+      const candidate = cloneMap(map);
+      const changed = moveProp(candidate, move.fromColumn, move.fromRow, move.target.column, move.target.row);
+      if (changed) {
+        history.push(cloneMap(map));
+        if (history.length > 60) history.shift();
+        future = [];
+        strokeChanged = true;
+        map = candidate;
+      }
+    }
+    movingProp = null;
+    render();
+  }
   if (strokeChanged) scheduleSave();
   isDrawing = false; strokeChanged = false; lastPaintedCell = "";
 }
@@ -256,6 +336,11 @@ function replaceMap(next: MapDocument): void {
 function download(content: Blob, filename: string): void {
   const link = document.createElement("a"); link.href = URL.createObjectURL(content); link.download = filename; link.click(); URL.revokeObjectURL(link.href);
 }
+function setFileMenuOpen(open: boolean): void {
+  fileMenuOpen = open;
+  document.querySelector("#file-menu")!.classList.toggle("hidden", !open);
+  document.querySelector("#file-menu-toggle")!.setAttribute("aria-expanded", String(open));
+}
 
 function saveAuthSession(session: AuthSession | null): void {
   authSession = session;
@@ -272,7 +357,8 @@ function restoreAuthSession(): AuthSession | null {
       typeof session.token !== "string" ||
       typeof session.profile?.id !== "string" ||
       typeof session.profile.email !== "string" ||
-      typeof session.profile.displayName !== "string"
+      typeof session.profile.displayName !== "string" ||
+      !isAvatarIcon(session.profile.avatarIcon)
     ) return null;
     return session as AuthSession;
   } catch {
@@ -282,6 +368,7 @@ function restoreAuthSession(): AuthSession | null {
 
 function renderProfile(): void {
   const slot = document.querySelector<HTMLDivElement>("#auth-slot")!;
+  slot.classList.remove("auth-ready");
   if (!authSession) return;
   const button = document.createElement("button");
   const avatar = document.createElement("span");
@@ -291,19 +378,39 @@ function renderProfile(): void {
   const shouldRename = authSession.profile.displayName === DEFAULT_DISPLAY_NAME;
   button.title = shouldRename ? "표시 이름을 수정하세요." : "계정 정보 수정";
   button.setAttribute("aria-label", shouldRename ? "표시 이름 수정하기" : "내 계정 정보 열기");
-  avatar.textContent = authSession.profile.displayName.trim().charAt(0).toUpperCase() || "?";
+  avatar.textContent = avatarGlyph(authSession.profile.avatarIcon, authSession.profile.displayName);
   name.textContent = authSession.profile.displayName;
-  button.append(avatar, name);
+  if (authSession.profile.avatarIcon === "hidden") button.classList.add("icon-hidden");
+  else button.append(avatar);
+  button.append(name);
   button.addEventListener("click", openProfileDialog);
   slot.replaceChildren(button);
 }
 
+function avatarGlyph(icon: AvatarIcon, displayName: string): string {
+  if (icon === "initial") return displayName.trim().charAt(0).toUpperCase() || "?";
+  return avatarOptions.find((option) => option.id === icon)?.glyph ?? "";
+}
+
+function selectAvatarIcon(icon: AvatarIcon): void {
+  pendingAvatarIcon = icon;
+  document.querySelectorAll<HTMLButtonElement>("[data-avatar-icon]").forEach((button) => {
+    const selected = button.dataset.avatarIcon === icon;
+    button.classList.toggle("selected", selected);
+    button.setAttribute("aria-pressed", String(selected));
+  });
+  if (!authSession) return;
+  const preview = document.querySelector<HTMLSpanElement>("#profile-avatar")!;
+  preview.classList.toggle("is-hidden", icon === "hidden");
+  preview.textContent = avatarGlyph(icon, authSession.profile.displayName);
+}
+
 function openProfileDialog(): void {
   if (!authSession) return;
-  document.querySelector("#profile-avatar")!.textContent = authSession.profile.displayName.charAt(0).toUpperCase() || "?";
   document.querySelector("#profile-email")!.textContent = authSession.profile.email;
   (document.querySelector("#profile-name") as HTMLInputElement).value = authSession.profile.displayName;
-  document.querySelector("#profile-message")!.textContent = "변경한 이름은 계정 설정에 저장됩니다.";
+  document.querySelector("#profile-message")!.textContent = "변경한 이름과 아이콘은 계정 설정에 저장됩니다.";
+  selectAvatarIcon(authSession.profile.avatarIcon);
   document.querySelector<HTMLDialogElement>("#profile-dialog")!.showModal();
 }
 
@@ -312,7 +419,9 @@ function renderAuthNote(message: string, title?: string): void {
   note.className = "auth-note";
   note.textContent = message;
   if (title) note.title = title;
-  document.querySelector<HTMLDivElement>("#auth-slot")!.replaceChildren(note);
+  const slot = document.querySelector<HTMLDivElement>("#auth-slot")!;
+  slot.classList.remove("auth-ready");
+  slot.replaceChildren(note);
 }
 
 function renderAuthRetry(label: string, retry: () => void): void {
@@ -321,7 +430,9 @@ function renderAuthRetry(label: string, retry: () => void): void {
   button.className = "auth-retry";
   button.textContent = label;
   button.addEventListener("click", retry);
-  document.querySelector<HTMLDivElement>("#auth-slot")!.replaceChildren(button);
+  const slot = document.querySelector<HTMLDivElement>("#auth-slot")!;
+  slot.classList.remove("auth-ready");
+  slot.replaceChildren(button);
 }
 
 async function loadGoogleIdentity(): Promise<void> {
@@ -381,6 +492,7 @@ async function renderGoogleSignIn(): Promise<void> {
     window.google.accounts.id.renderButton(slot, {
       theme: "outline", size: "medium", shape: "rectangular", text: "signin_with", locale: "ko", width: 200,
     });
+    slot.classList.add("auth-ready");
   } catch (error) {
     console.error("Google Identity initialization failed", error);
     renderAuthRetry("로그인 다시 시도", () => { void renderGoogleSignIn(); });
@@ -417,18 +529,59 @@ async function initializeAuth(): Promise<void> {
   }
 }
 
+const propModeCopy: Record<PropMode, { label: string; hint: string }> = {
+  place: { label: "배치", hint: "사물을 누른 채 움직여 연속으로 배치합니다." },
+  move: { label: "이동", hint: "사물을 드래그해 다른 셀로 옮깁니다. 도착한 사물은 덮어씁니다." },
+  erase: { label: "지우개", hint: "셀을 누르거나 드래그해 사물만 지웁니다." },
+};
+function setPropMode(mode: PropMode): void {
+  propMode = mode;
+  document.querySelectorAll<HTMLButtonElement>("[data-prop-mode]").forEach((button) => {
+    const active = button.dataset.propMode === mode;
+    button.classList.toggle("active", active);
+    button.setAttribute("aria-pressed", String(active));
+  });
+  document.querySelector("#prop-mode-label")!.textContent = propModeCopy[mode].label;
+  document.querySelector("#prop-mode-hint")!.textContent = propModeCopy[mode].hint;
+  canvas.classList.remove("prop-mode-place", "prop-mode-move", "prop-mode-erase");
+  canvas.classList.add(`prop-mode-${mode}`);
+}
+
 canvas.addEventListener("pointerdown", (event) => {
+  if (selectedLayer === "prop" && propMode === "move") {
+    if (event.button !== 0) return;
+    const cell = getCell(event);
+    const prop = cell ? map.cells[cellIndex(map, cell.column, cell.row)].prop : null;
+    if (!cell || !prop) return;
+    event.preventDefault();
+    isDrawing = true;
+    strokeChanged = false;
+    lastPaintedCell = `${cell.column}:${cell.row}`;
+    movingProp = { prop, fromColumn: cell.column, fromRow: cell.row, target: cell };
+    canvas.setPointerCapture(event.pointerId);
+    render();
+    return;
+  }
   if (event.button !== 0 && event.button !== 2) return;
   event.preventDefault(); isDrawing = true; canvas.setPointerCapture(event.pointerId); paintAt(event);
 });
 canvas.addEventListener("pointermove", paintAt);
-canvas.addEventListener("pointerup", finishStroke);
-canvas.addEventListener("pointercancel", finishStroke);
+canvas.addEventListener("pointerup", (event) => {
+  finishStroke();
+  if (canvas.hasPointerCapture(event.pointerId)) canvas.releasePointerCapture(event.pointerId);
+});
+canvas.addEventListener("pointercancel", (event) => {
+  movingProp = null;
+  finishStroke();
+  render();
+  if (canvas.hasPointerCapture(event.pointerId)) canvas.releasePointerCapture(event.pointerId);
+});
 canvas.addEventListener("contextmenu", (event) => event.preventDefault());
 canvas.addEventListener("pointerleave", () => { document.querySelector("#cursor-status")!.textContent = "셀 위에 커서를 올려보세요"; });
 
 document.querySelectorAll<HTMLButtonElement>("[data-layer]").forEach((button) => button.addEventListener("click", () => {
-  selectedLayer = button.dataset.layer as Layer; eraseMode = false;
+  selectedLayer = button.dataset.layer as Layer;
+  if (selectedLayer === "prop") setPropMode("place");
   document.querySelectorAll("[data-layer]").forEach((item) => item.classList.toggle("active", item === button));
   document.querySelector("#ground-palette")!.classList.toggle("hidden", selectedLayer !== "ground");
   document.querySelector("#prop-palette")!.classList.toggle("hidden", selectedLayer !== "prop");
@@ -438,14 +591,13 @@ document.querySelectorAll<HTMLButtonElement>("[data-ground]").forEach((button) =
   document.querySelectorAll("[data-ground]").forEach((item) => item.classList.toggle("selected", item === button));
 }));
 document.querySelectorAll<HTMLButtonElement>("[data-prop]").forEach((button) => button.addEventListener("click", () => {
-  selectedProp = button.dataset.prop as PropType; eraseMode = false;
-  document.querySelector("#eraser")!.classList.remove("active");
+  selectedProp = button.dataset.prop as PropType;
+  setPropMode("place");
   document.querySelectorAll("[data-prop]").forEach((item) => item.classList.toggle("selected", item === button));
 }));
-document.querySelector("#eraser")!.addEventListener("click", (event) => {
-  eraseMode = !eraseMode; (event.currentTarget as HTMLElement).classList.toggle("active", eraseMode);
-  (event.currentTarget as HTMLElement).textContent = eraseMode ? "⌫ 사물 지우개 켜짐" : "⌫ 사물 지우개 끄기";
-});
+document.querySelectorAll<HTMLButtonElement>("[data-prop-mode]").forEach((button) => button.addEventListener("click", () => {
+  setPropMode(button.dataset.propMode as PropMode);
+}));
 document.querySelector("#map-name")!.addEventListener("input", (event) => {
   map.name = (event.target as HTMLInputElement).value || "이름 없는 지도"; map.updatedAt = new Date().toISOString(); scheduleSave();
 });
@@ -459,10 +611,25 @@ document.querySelector("#reset-map")!.addEventListener("click", () => replaceMap
 document.querySelector("#clear-map")!.addEventListener("click", () => {
   const next = createInitialMap(); next.name = "새로운 숲"; next.cells = next.cells.map(() => ({ ground: "grass", prop: null })); replaceMap(next);
 });
-document.querySelector("#export-json")!.addEventListener("click", () => download(new Blob([serializeMap(map)], { type: "application/json" }), "forest-map.json"));
+document.querySelector("#export-json")!.addEventListener("click", () => {
+  setFileMenuOpen(false);
+  download(new Blob([serializeMap(map)], { type: "application/json" }), "forest-map.json");
+});
 document.querySelector("#export-png")!.addEventListener("click", () => {
+  setFileMenuOpen(false);
   const wasVisible = gridVisible; gridVisible = false; render();
   canvas.toBlob((blob) => { if (blob) download(blob, "forest-map.png"); gridVisible = wasVisible; render(); }, "image/png");
+});
+document.querySelector("#file-menu-toggle")!.addEventListener("click", (event) => {
+  event.stopPropagation();
+  setFileMenuOpen(!fileMenuOpen);
+});
+document.addEventListener("click", (event) => {
+  const menu = document.querySelector(".file-menu-wrap");
+  if (fileMenuOpen && menu && event.target instanceof Node && !menu.contains(event.target)) setFileMenuOpen(false);
+});
+window.addEventListener("keydown", (event) => {
+  if (event.key === "Escape") setFileMenuOpen(false);
 });
 const dialog = document.querySelector<HTMLDialogElement>("#reference-dialog")!;
 document.querySelector("#open-reference")!.addEventListener("click", () => dialog.showModal());
@@ -471,6 +638,11 @@ dialog.addEventListener("click", (event) => { if (event.target === dialog) dialo
 const pageQrDialog = document.querySelector<HTMLDialogElement>("#page-qr-dialog")!;
 document.querySelector("#open-page-qr")!.addEventListener("click", () => pageQrDialog.showModal());
 pageQrDialog.addEventListener("click", () => pageQrDialog.close());
+document.querySelectorAll<HTMLButtonElement>("[data-avatar-icon]").forEach((button) => {
+  button.addEventListener("click", () => {
+    if (isAvatarIcon(button.dataset.avatarIcon)) selectAvatarIcon(button.dataset.avatarIcon);
+  });
+});
 document.querySelector("#save-profile")!.addEventListener("click", async () => {
   if (!authClient || !authSession) return;
   const button = document.querySelector<HTMLButtonElement>("#save-profile")!;
@@ -480,7 +652,11 @@ document.querySelector("#save-profile")!.addEventListener("click", async () => {
   try {
     const displayName = (document.querySelector("#profile-name") as HTMLInputElement).value.trim();
     if (!displayName) throw new Error("표시 이름을 입력해 주세요.");
-    const { profile } = await authClient.updateProfile(authSession.token, displayName);
+    const { profile } = await authClient.updateProfile(
+      authSession.token,
+      displayName,
+      pendingAvatarIcon,
+    );
     saveAuthSession({ token: authSession.token, profile });
     renderProfile();
     document.querySelector<HTMLDialogElement>("#profile-dialog")!.close();
@@ -510,5 +686,6 @@ document.querySelector("#logout")!.addEventListener("click", async () => {
 window.addEventListener("keydown", (event) => {
   if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === "z") { event.preventDefault(); event.shiftKey ? redo() : undo(); }
 });
+setPropMode(propMode);
 render();
 void initializeAuth();
