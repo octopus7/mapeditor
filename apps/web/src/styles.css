@@ -94,12 +94,19 @@ button:focus-visible, input:focus-visible, canvas:focus-visible { outline: 3px s
 .stage-controls { display: flex; gap: 5px; }
 .icon-button { width: 29px; height: 29px; border: 1px solid #d0d3ca; border-radius: 6px; color: #7e8880; background: #f8f7f0; cursor: pointer; font-size: 13px; }
 .icon-button.active { color: #31583a; border-color: #9eaf9e; background: #e7ece3; }
+.fullscreen-toggle { width: 37px; height: 37px; color: #31583a; border-color: #9eaf9e; background: #e7ece3; }
+.fullscreen-toggle[aria-pressed="true"] { color: #f5f5eb; border-color: #315a3d; background: #315a3d; }
+.fullscreen-icon, .file-menu-toggle svg { width: 17px; height: 17px; display: block; margin: auto; fill: none; stroke: currentColor; stroke-linecap: round; stroke-linejoin: round; stroke-width: 1.8; }
+.file-menu-toggle svg { width: 18px; height: 18px; }
 .canvas-scroll { min-height: 0; padding: 28px; overflow: auto; display: grid; align-items: center; background-color: #dcddd3; background-image: radial-gradient(#c6c9bd 1px, transparent 1px); background-size: 18px 18px; }
 .canvas-frame { width: min(100%, 1008px); min-width: 660px; margin: auto; padding: 7px; border: 1px solid #bcc1b6; border-radius: 5px; background: #f7f6ee; box-shadow: 0 20px 45px rgba(46, 61, 49, .2), 0 2px 5px rgba(46, 61, 49, .15); }
 #map-canvas { display: block; width: 100%; height: auto; cursor: crosshair; image-rendering: auto; touch-action: none; }
 #map-canvas.prop-mode-move { cursor: grab; }
 #map-canvas.prop-mode-move:active { cursor: grabbing; }
 #map-canvas.prop-mode-erase { cursor: cell; }
+:fullscreen { background: #e8e7db; }
+body.fullscreen-fallback { overflow: hidden; }
+body.fullscreen-fallback .app-shell { min-height: 100dvh; }
 
 .reference-image { position: relative; width: 100%; aspect-ratio: 1; margin: 19px 0 18px; padding: 0; overflow: hidden; border: 0; border-radius: 11px; background: #dce3d5; cursor: zoom-in; box-shadow: 0 8px 22px rgba(36, 55, 41, .13); }
 .reference-image img { width: 100%; height: 100%; display: block; object-fit: cover; transition: transform .35s ease; }.reference-image:hover img { transform: scale(1.025); }

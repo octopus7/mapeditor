@@ -62,6 +62,7 @@ let authSession: AuthSession | null = null;
 let googleClientId = "";
 let googleIdentityLoadPromise: Promise<void> | null = null;
 let fileMenuOpen = false;
+let fullscreenFallback = false;
 let pendingAvatarIcon: AvatarIcon = "initial";
 
 document.querySelector<HTMLDivElement>("#app")!.innerHTML = `
@@ -79,8 +80,14 @@ document.querySelector<HTMLDivElement>("#app")!.innerHTML = `
         <div class="auth-slot" id="auth-slot"><span class="auth-note">로그인 준비 중</span></div>
         <button class="button ghost" id="undo" title="실행 취소 (Ctrl+Z)">↶ <span>실행 취소</span></button>
         <button class="button ghost" id="redo" title="다시 실행 (Ctrl+Shift+Z)">↷</button>
+        <button class="icon-button fullscreen-toggle" id="toggle-fullscreen" aria-expanded="false" aria-pressed="false" title="전체 화면으로 전환" aria-label="전체 화면으로 전환">
+          <svg class="fullscreen-icon" data-fullscreen-icon="expand" viewBox="0 0 24 24" aria-hidden="true"><path d="M8 4H4v4M16 4h4v4M20 16v4h-4M4 16v4h4" /></svg>
+          <svg class="fullscreen-icon hidden" data-fullscreen-icon="contract" viewBox="0 0 24 24" aria-hidden="true"><path d="M9 4v5H4M15 4v5h5M20 15h-5v5M9 20v-5H4" /></svg>
+        </button>
         <div class="file-menu-wrap">
-          <button class="icon-button file-menu-toggle" id="file-menu-toggle" aria-expanded="false" aria-controls="file-menu" aria-haspopup="menu" title="파일 메뉴">☰</button>
+          <button class="icon-button file-menu-toggle" id="file-menu-toggle" aria-expanded="false" aria-controls="file-menu" aria-haspopup="menu" title="파일 메뉴" aria-label="파일 메뉴">
+            <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 7h16M4 12h16M4 17h16" /></svg>
+          </button>
           <div class="file-menu hidden" id="file-menu" role="menu" aria-label="파일 기능">
             <span class="file-menu-heading">파일 내보내기</span>
             <button class="button export" id="export-json" role="menuitem">JSON 저장</button>
@@ -340,6 +347,50 @@ function setFileMenuOpen(open: boolean): void {
   fileMenuOpen = open;
   document.querySelector("#file-menu")!.classList.toggle("hidden", !open);
   document.querySelector("#file-menu-toggle")!.setAttribute("aria-expanded", String(open));
+}
+type WebkitDocument = Document & {
+  webkitFullscreenElement?: Element | null;
+  webkitExitFullscreen?: () => Promise<void> | void;
+};
+type WebkitFullscreenElement = HTMLElement & {
+  webkitRequestFullscreen?: () => Promise<void> | void;
+};
+function getFullscreenElement(): Element | null {
+  const safariDocument = document as WebkitDocument;
+  return document.fullscreenElement ?? safariDocument.webkitFullscreenElement ?? null;
+}
+function updateFullscreenButton(): void {
+  const nativeFullscreen = getFullscreenElement() !== null;
+  const active = nativeFullscreen || fullscreenFallback;
+  document.querySelectorAll<SVGElement>("[data-fullscreen-icon]").forEach((icon) => {
+    icon.classList.toggle("hidden", icon.dataset.fullscreenIcon !== (active ? "contract" : "expand"));
+  });
+  const button = document.querySelector<HTMLButtonElement>("#toggle-fullscreen")!;
+  const label = active ? "표준 모드로 돌아가기" : "전체 화면으로 전환";
+  button.setAttribute("aria-pressed", String(active));
+  button.setAttribute("aria-label", label);
+  button.title = label;
+  document.body.classList.toggle("fullscreen-fallback", active && !nativeFullscreen);
+}
+async function toggleFullscreen(): Promise<void> {
+  const safariDocument = document as WebkitDocument;
+  const current = getFullscreenElement();
+  try {
+    if (current) {
+      if (document.exitFullscreen) await document.exitFullscreen();
+      else if (safariDocument.webkitExitFullscreen) await safariDocument.webkitExitFullscreen();
+      fullscreenFallback = false;
+    } else {
+      const root = document.documentElement as WebkitFullscreenElement;
+      if (root.requestFullscreen) await root.requestFullscreen();
+      else if (root.webkitRequestFullscreen) await root.webkitRequestFullscreen();
+      else fullscreenFallback = true;
+    }
+  } catch (error) {
+    console.warn("Fullscreen mode is unavailable", error);
+    fullscreenFallback = true;
+  }
+  updateFullscreenButton();
 }
 
 function saveAuthSession(session: AuthSession | null): void {
@@ -624,6 +675,9 @@ document.querySelector("#file-menu-toggle")!.addEventListener("click", (event) =
   event.stopPropagation();
   setFileMenuOpen(!fileMenuOpen);
 });
+document.querySelector("#toggle-fullscreen")!.addEventListener("click", () => { void toggleFullscreen(); });
+document.addEventListener("fullscreenchange", updateFullscreenButton);
+document.addEventListener("webkitfullscreenchange", updateFullscreenButton);
 document.addEventListener("click", (event) => {
   const menu = document.querySelector(".file-menu-wrap");
   if (fileMenuOpen && menu && event.target instanceof Node && !menu.contains(event.target)) setFileMenuOpen(false);
@@ -687,5 +741,6 @@ window.addEventListener("keydown", (event) => {
   if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === "z") { event.preventDefault(); event.shiftKey ? redo() : undo(); }
 });
 setPropMode(propMode);
+updateFullscreenButton();
 render();
 void initializeAuth();

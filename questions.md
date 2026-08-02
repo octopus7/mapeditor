@@ -43,3 +43,10 @@
 - 질문 내용: Google OAuth Web application Client의 `Authorized JavaScript origins`에 `https://mapedit.pages.dev`를 등록하고 완료 여부를 알려줄 수 있는가?
 - 질문 이유: 운영 페이지의 Google 로그인 요청이 `400 origin_mismatch`로 거부되어, Google 콘솔에서 실제 Pages origin을 허용해야 했다.
 - 답변: 사용자가 Google 콘솔의 승인된 JavaScript 원본에 `https://mapedit.pages.dev`가 입력된 화면을 제공했다.
+
+## Pages Wrangler 인증 권한 확인
+
+- 질문 시각: 2026-08-02 18:04:00 KST
+- 질문 내용: Wrangler의 로컬 Cloudflare 인증 설정을 확인해 Pages 배포를 진행할까요?
+- 질문 이유: 일반 샌드박스 실행에서 Wrangler 로그 파일 권한과 비대화형 인증 제한으로 Pages 배포가 중단되어, 로컬 Wrangler OAuth 인증 설정에 접근할 권한이 필요했다.
+- 답변: 권한 요청이 승인되었고, Wrangler OAuth 인증으로 `mapedit` Pages 배포를 완료했다.
