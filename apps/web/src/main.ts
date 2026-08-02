@@ -3,6 +3,7 @@ import {
   cellIndex, cloneMap, createInitialMap, deserializeMap, moveProp, paintGround, placeProp, serializeMap,
   type GroundType, type MapDocument, type PropType,
 } from "./editor-model";
+import { getTransitionLayers, NEIGHBOR_MASK } from "./autotile";
 import {
   AuthClient, isAvatarIcon, parsePublicAppConfig,
   type AuthSession, type AvatarIcon,
@@ -64,6 +65,16 @@ let googleIdentityLoadPromise: Promise<void> | null = null;
 let fileMenuOpen = false;
 let fullscreenFallback = false;
 let pendingAvatarIcon: AvatarIcon = "initial";
+let zoom = 1;
+let panX = 0;
+let panY = 0;
+let panMode = false;
+let isPanning = false;
+let panStartX = 0;
+let panStartY = 0;
+let panOriginX = 0;
+let panOriginY = 0;
+let spacePressed = false;
 
 document.querySelector<HTMLDivElement>("#app")!.innerHTML = `
   <div class="app-shell">
@@ -137,12 +148,22 @@ document.querySelector<HTMLDivElement>("#app")!.innerHTML = `
         <div class="stage-toolbar">
           <div class="status-dot"><i></i><span id="save-status">브라우저에 자동 저장됨</span></div>
           <div class="stage-controls">
-            <button class="icon-button active" id="toggle-grid" aria-pressed="true" title="격자 표시">#</button>
-            <button class="icon-button" id="reset-map" title="예시 지도로 초기화">↺</button>
-            <button class="icon-button" id="clear-map" title="빈 지도로 만들기">□</button>
+            <div class="viewport-controls" aria-label="작업 영역 뷰포트">
+              <button class="icon-button" id="zoom-out" title="축소" aria-label="축소">−</button>
+              <button class="zoom-readout" id="zoom-reset" title="확대/축소와 위치 초기화" aria-label="확대/축소와 위치 초기화">100%</button>
+              <button class="icon-button" id="zoom-in" title="확대" aria-label="확대">+</button>
+              <button class="icon-button pan-toggle" id="toggle-pan" aria-pressed="false" title="작업 영역 이동 모드" aria-label="작업 영역 이동 모드">
+                <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M8 11V6.5a1.5 1.5 0 0 1 3 0V11m0-1V5.5a1.5 1.5 0 0 1 3 0V11m0-1V7a1.5 1.5 0 0 1 3 0v6m0-1v-1a1.5 1.5 0 0 1 3 0v3.5c0 4.1-2.6 6.5-6.5 6.5h-1.2c-2.1 0-3.5-.8-4.7-2.3L5 16.8a1.7 1.7 0 0 1 2.4-2.4L8 15" /></svg>
+              </button>
+            </div>
+            <div class="stage-map-controls">
+              <button class="icon-button active" id="toggle-grid" aria-pressed="true" title="격자 표시">#</button>
+              <button class="icon-button" id="reset-map" title="예시 지도로 초기화">↺</button>
+              <button class="icon-button" id="clear-map" title="빈 지도로 만들기">□</button>
+            </div>
           </div>
         </div>
-        <div class="canvas-scroll"><div class="canvas-frame">
+        <div class="canvas-scroll"><div class="canvas-frame" id="canvas-frame">
           <canvas id="map-canvas" aria-label="28 곱하기 18 타일 지도" tabindex="0"></canvas>
         </div></div>
         <div class="stage-footer"><span><b>28 × 18</b> 셀</span><span id="cursor-status">셀 위에 커서를 올려보세요</span><span class="footer-links">로컬 초안 · <button type="button" id="open-page-qr">page qr</button> · <a href="https://mapedit.pages.dev/cdn-cgi/trace" target="_blank" rel="noopener noreferrer">cdn trace</a> · <a href="https://github.com/octopus7/mapeditor" target="_blank" rel="noopener noreferrer">github</a></span></div>
@@ -186,6 +207,7 @@ document.querySelector<HTMLDivElement>("#app")!.innerHTML = `
 `;
 
 const canvas = document.querySelector<HTMLCanvasElement>("#map-canvas")!;
+const canvasFrame = document.querySelector<HTMLDivElement>("#canvas-frame")!;
 const context = canvas.getContext("2d")!;
 canvas.width = map.columns * CELL_SIZE;
 canvas.height = map.rows * CELL_SIZE;
@@ -208,7 +230,7 @@ function escapeHtml(value: string): string {
 function colorNoise(column: number, row: number): number {
   return ((column * 31 + row * 17 + 26) % 11) - 5;
 }
-function drawGround(column: number, row: number, ground: GroundType): void {
+function drawGroundTexture(column: number, row: number, ground: GroundType): void {
   const x = column * CELL_SIZE;
   const y = row * CELL_SIZE;
   const noise = colorNoise(column, row);
@@ -232,6 +254,31 @@ function drawGround(column: number, row: number, ground: GroundType): void {
     context.beginPath(); context.arc(x + 26, y + 25, ground === "stone" ? 3 : 1.2, 0, Math.PI * 2); context.fill();
   }
   context.restore();
+}
+function createTransitionPath(column: number, row: number, mask: number): Path2D {
+  const x = column * CELL_SIZE;
+  const y = row * CELL_SIZE;
+  const edge = CELL_SIZE * .25;
+  const path = new Path2D();
+  if (mask & NEIGHBOR_MASK.N) path.rect(x, y, CELL_SIZE, edge);
+  if (mask & NEIGHBOR_MASK.E) path.rect(x + CELL_SIZE - edge, y, edge, CELL_SIZE);
+  if (mask & NEIGHBOR_MASK.S) path.rect(x, y + CELL_SIZE - edge, CELL_SIZE, edge);
+  if (mask & NEIGHBOR_MASK.W) path.rect(x, y, edge, CELL_SIZE);
+  const cornerRadius = edge * .9;
+  if (mask & NEIGHBOR_MASK.NE) path.arc(x + CELL_SIZE - edge / 2, y + edge / 2, cornerRadius, 0, Math.PI * 2);
+  if (mask & NEIGHBOR_MASK.SE) path.arc(x + CELL_SIZE - edge / 2, y + CELL_SIZE - edge / 2, cornerRadius, 0, Math.PI * 2);
+  if (mask & NEIGHBOR_MASK.SW) path.arc(x + edge / 2, y + CELL_SIZE - edge / 2, cornerRadius, 0, Math.PI * 2);
+  if (mask & NEIGHBOR_MASK.NW) path.arc(x + edge / 2, y + edge / 2, cornerRadius, 0, Math.PI * 2);
+  return path;
+}
+function drawGround(column: number, row: number, ground: GroundType): void {
+  drawGroundTexture(column, row, ground);
+  for (const layer of getTransitionLayers(map, column, row)) {
+    context.save();
+    context.clip(createTransitionPath(column, row, layer.mask));
+    drawGroundTexture(column, row, layer.ground);
+    context.restore();
+  }
 }
 const propScale: Record<PropType, number> = {
   "broadleaf-tree": 2.15, "pine-tree": 2.05, shrub: 1.25, boulder: 1.35, "fallen-log": 1.65, footbridge: 1.65,
@@ -267,6 +314,46 @@ function render(): void {
   }
   updateHistoryButtons();
 }
+const MIN_ZOOM = .5;
+const MAX_ZOOM = 2.5;
+const ZOOM_STEP = .25;
+function updateViewport(): void {
+  canvasFrame.style.setProperty("--map-zoom", String(zoom));
+  canvasFrame.style.setProperty("--pan-x", `${panX}px`);
+  canvasFrame.style.setProperty("--pan-y", `${panY}px`);
+  const readout = document.querySelector<HTMLButtonElement>("#zoom-reset")!;
+  readout.textContent = `${Math.round(zoom * 100)}%`;
+  readout.setAttribute("aria-label", `확대/축소 ${Math.round(zoom * 100)}%, 클릭하면 위치와 함께 초기화`);
+  canvas.classList.toggle("pan-mode", panMode || spacePressed || isPanning);
+  canvas.classList.toggle("is-panning", isPanning);
+  document.querySelector<HTMLButtonElement>("#toggle-pan")!.classList.toggle("active", panMode);
+  document.querySelector<HTMLButtonElement>("#toggle-pan")!.setAttribute("aria-pressed", String(panMode));
+}
+function setZoom(nextZoom: number): void {
+  zoom = Math.max(MIN_ZOOM, Math.min(MAX_ZOOM, nextZoom));
+  updateViewport();
+}
+function resetViewport(): void {
+  zoom = 1;
+  panX = 0;
+  panY = 0;
+  updateViewport();
+}
+function beginPan(event: PointerEvent): void {
+  isPanning = true;
+  panStartX = event.clientX;
+  panStartY = event.clientY;
+  panOriginX = panX;
+  panOriginY = panY;
+  canvas.setPointerCapture(event.pointerId);
+  updateViewport();
+}
+function panAt(event: PointerEvent): void {
+  if (!isPanning) return;
+  panX = panOriginX + event.clientX - panStartX;
+  panY = panOriginY + event.clientY - panStartY;
+  updateViewport();
+}
 function getCell(event: PointerEvent): CellPosition | null {
   const rect = canvas.getBoundingClientRect();
   if (event.clientX < rect.left || event.clientX >= rect.right || event.clientY < rect.top || event.clientY >= rect.bottom) return null;
@@ -300,6 +387,13 @@ function paintAt(event: PointerEvent): void {
   strokeChanged = true; map = candidate; render();
 }
 function finishStroke(): void {
+  if (isPanning) {
+    isPanning = false;
+    isDrawing = false;
+    lastPaintedCell = "";
+    updateViewport();
+    return;
+  }
   if (movingProp) {
     const move = movingProp;
     if (move.target) {
@@ -420,6 +514,7 @@ function restoreAuthSession(): AuthSession | null {
 function renderProfile(): void {
   const slot = document.querySelector<HTMLDivElement>("#auth-slot")!;
   slot.classList.remove("auth-ready");
+  slot.classList.remove("auth-logged-out");
   if (!authSession) return;
   const button = document.createElement("button");
   const avatar = document.createElement("span");
@@ -472,6 +567,7 @@ function renderAuthNote(message: string, title?: string): void {
   if (title) note.title = title;
   const slot = document.querySelector<HTMLDivElement>("#auth-slot")!;
   slot.classList.remove("auth-ready");
+  slot.classList.remove("auth-logged-out");
   slot.replaceChildren(note);
 }
 
@@ -483,6 +579,7 @@ function renderAuthRetry(label: string, retry: () => void): void {
   button.addEventListener("click", retry);
   const slot = document.querySelector<HTMLDivElement>("#auth-slot")!;
   slot.classList.remove("auth-ready");
+  slot.classList.remove("auth-logged-out");
   slot.replaceChildren(button);
 }
 
@@ -534,6 +631,7 @@ async function renderGoogleSignIn(): Promise<void> {
   try {
     await loadGoogleIdentity();
     if (!window.google) throw new Error("Google Identity API가 준비되지 않았습니다.");
+    slot.classList.add("auth-logged-out");
     slot.replaceChildren();
     window.google.accounts.id.initialize({
       client_id: googleClientId,
@@ -599,6 +697,12 @@ function setPropMode(mode: PropMode): void {
 }
 
 canvas.addEventListener("pointerdown", (event) => {
+  if (event.button === 1 || (event.button === 0 && (panMode || spacePressed))) {
+    event.preventDefault();
+    isDrawing = false;
+    beginPan(event);
+    return;
+  }
   if (selectedLayer === "prop" && propMode === "move") {
     if (event.button !== 0) return;
     const cell = getCell(event);
@@ -616,7 +720,10 @@ canvas.addEventListener("pointerdown", (event) => {
   if (event.button !== 0 && event.button !== 2) return;
   event.preventDefault(); isDrawing = true; canvas.setPointerCapture(event.pointerId); paintAt(event);
 });
-canvas.addEventListener("pointermove", paintAt);
+canvas.addEventListener("pointermove", (event) => {
+  if (isPanning) panAt(event);
+  else paintAt(event);
+});
 canvas.addEventListener("pointerup", (event) => {
   finishStroke();
   if (canvas.hasPointerCapture(event.pointerId)) canvas.releasePointerCapture(event.pointerId);
@@ -658,6 +765,13 @@ document.querySelector("#toggle-grid")!.addEventListener("click", (event) => {
   gridVisible = !gridVisible; const button = event.currentTarget as HTMLButtonElement;
   button.classList.toggle("active", gridVisible); button.setAttribute("aria-pressed", String(gridVisible)); render();
 });
+document.querySelector("#zoom-out")!.addEventListener("click", () => setZoom(zoom - ZOOM_STEP));
+document.querySelector("#zoom-in")!.addEventListener("click", () => setZoom(zoom + ZOOM_STEP));
+document.querySelector("#zoom-reset")!.addEventListener("click", resetViewport);
+document.querySelector("#toggle-pan")!.addEventListener("click", () => {
+  panMode = !panMode;
+  updateViewport();
+});
 document.querySelector("#reset-map")!.addEventListener("click", () => replaceMap(createInitialMap()));
 document.querySelector("#clear-map")!.addEventListener("click", () => {
   const next = createInitialMap(); next.name = "새로운 숲"; next.cells = next.cells.map(() => ({ ground: "grass", prop: null })); replaceMap(next);
@@ -684,6 +798,22 @@ document.addEventListener("click", (event) => {
 });
 window.addEventListener("keydown", (event) => {
   if (event.key === "Escape") setFileMenuOpen(false);
+});
+window.addEventListener("keydown", (event) => {
+  if (event.code !== "Space" || document.activeElement !== canvas) return;
+  event.preventDefault();
+  spacePressed = true;
+  updateViewport();
+});
+window.addEventListener("keyup", (event) => {
+  if (event.code !== "Space") return;
+  spacePressed = false;
+  updateViewport();
+});
+window.addEventListener("blur", () => {
+  spacePressed = false;
+  if (isPanning) finishStroke();
+  updateViewport();
 });
 const dialog = document.querySelector<HTMLDialogElement>("#reference-dialog")!;
 document.querySelector("#open-reference")!.addEventListener("click", () => dialog.showModal());
@@ -742,5 +872,6 @@ window.addEventListener("keydown", (event) => {
 });
 setPropMode(propMode);
 updateFullscreenButton();
+updateViewport();
 render();
 void initializeAuth();
