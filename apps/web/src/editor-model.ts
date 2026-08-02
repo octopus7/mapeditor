@@ -18,12 +18,25 @@ export interface MapCell {
   ground: GroundType;
   prop: PropType | null;
 }
+
+export const IMAGE_MIN_SCALE = 0.25;
+export const IMAGE_MAX_SCALE = 6;
+
+export interface MapImagePlacement {
+  imageId: string;
+  column: number;
+  row: number;
+  rotation: number;
+  scale: number;
+}
+
 export interface MapDocument {
   version: 1;
   name: string;
   columns: number;
   rows: number;
   cells: MapCell[];
+  images: MapImagePlacement[];
   updatedAt: string;
 }
 
@@ -39,6 +52,7 @@ export function cloneMap(map: MapDocument): MapDocument {
   return {
     ...map,
     cells: map.cells.map((cell) => ({ ...cell })),
+    images: map.images.map((image) => ({ ...image })),
   };
 }
 
@@ -66,6 +80,66 @@ export function placeProp(
   const cell = map.cells[cellIndex(map, column, row)];
   if (cell.prop === prop) return false;
   cell.prop = prop;
+  map.updatedAt = new Date().toISOString();
+  return true;
+}
+
+export function placeImage(
+  map: MapDocument,
+  imageId: string,
+  column: number,
+  row: number,
+  rotation = 0,
+  scale = 1,
+): boolean {
+  if (!isInside(map, column, row) || !imageId.trim()) return false;
+  map.images.push({
+    imageId,
+    column,
+    row,
+    rotation: normalizeRotation(rotation),
+    scale: normalizeImageScale(scale),
+  });
+  map.updatedAt = new Date().toISOString();
+  return true;
+}
+
+export function moveImage(
+  map: MapDocument,
+  imageIndex: number,
+  column: number,
+  row: number,
+): boolean {
+  if (!Number.isInteger(imageIndex) || !isInside(map, column, row)) return false;
+  const image = map.images[imageIndex];
+  if (!image || (image.column === column && image.row === row)) return false;
+  image.column = column;
+  image.row = row;
+  map.updatedAt = new Date().toISOString();
+  return true;
+}
+
+export function removeImage(map: MapDocument, imageIndex: number): boolean {
+  if (!Number.isInteger(imageIndex) || imageIndex < 0 || imageIndex >= map.images.length) return false;
+  map.images.splice(imageIndex, 1);
+  map.updatedAt = new Date().toISOString();
+  return true;
+}
+
+export function updateImageTransform(
+  map: MapDocument,
+  imageIndex: number,
+  rotation: number,
+  scale: number,
+): boolean {
+  if (!Number.isInteger(imageIndex)) return false;
+  const image = map.images[imageIndex];
+  if (!image) return false;
+  const nextRotation = normalizeRotation(rotation);
+  const nextScale = normalizeImageScale(scale);
+  if (image.rotation === nextRotation && image.scale === nextScale) return false;
+  image.rotation = nextRotation;
+  image.scale = nextScale;
   map.updatedAt = new Date().toISOString();
   return true;
 }
@@ -108,6 +182,7 @@ export function createInitialMap(): MapDocument {
       ground: "grass" as GroundType,
       prop: null,
     })),
+    images: [],
     updatedAt: new Date().toISOString(),
   };
 
@@ -179,6 +254,9 @@ export function deserializeMap(value: string): MapDocument | null {
       return null;
     }
 
+    const rawImages = parsed.images === undefined ? [] : parsed.images;
+    if (!Array.isArray(rawImages)) return null;
+
     const cells: MapCell[] = [];
     for (const rawCell of parsed.cells) {
       const cell = rawCell as Partial<MapCell>;
@@ -187,15 +265,61 @@ export function deserializeMap(value: string): MapDocument | null {
       cells.push({ ground: cell.ground as GroundType, prop: cell.prop as PropType | null });
     }
 
+    const images: MapImagePlacement[] = [];
+    for (const rawImage of rawImages) {
+      const image = parseImagePlacement(rawImage, parsed.columns, parsed.rows);
+      if (!image) return null;
+      images.push(image);
+    }
+
     return {
       version: 1,
       name: parsed.name,
       columns: parsed.columns,
       rows: parsed.rows,
       cells,
+      images,
       updatedAt: typeof parsed.updatedAt === "string" ? parsed.updatedAt : new Date().toISOString(),
     };
   } catch {
     return null;
   }
+}
+
+function normalizeRotation(value: number): number {
+  if (!Number.isFinite(value)) return 0;
+  return ((value % 360) + 360) % 360;
+}
+
+function normalizeImageScale(value: number): number {
+  if (!Number.isFinite(value)) return 1;
+  return Math.max(IMAGE_MIN_SCALE, Math.min(IMAGE_MAX_SCALE, value));
+}
+
+function parseImagePlacement(value: unknown, columns: number, rows: number): MapImagePlacement | null {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return null;
+  const record = value as Partial<MapImagePlacement>;
+  if (
+    typeof record.imageId !== "string" ||
+    !record.imageId.trim() ||
+    record.imageId.length > 128 ||
+    !Number.isInteger(record.column) ||
+    !Number.isInteger(record.row) ||
+    record.column < 0 ||
+    record.row < 0 ||
+    record.column >= columns ||
+    record.row >= rows ||
+    typeof record.rotation !== "number" ||
+    !Number.isFinite(record.rotation) ||
+    typeof record.scale !== "number" ||
+    !Number.isFinite(record.scale)
+  ) return null;
+
+  return {
+    imageId: record.imageId.trim(),
+    column: record.column,
+    row: record.row,
+    rotation: normalizeRotation(record.rotation),
+    scale: normalizeImageScale(record.scale),
+  };
 }

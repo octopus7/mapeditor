@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from "vitest";
 import { createInitialMap, type MapDocument } from "../src/editor-model";
-import { MapStorageClient, resizeMap } from "../src/map-library";
+import { getResizeOffsets, MapStorageClient, resizeMap } from "../src/map-library";
 
 function createSmallMap(): MapDocument {
   const map = createInitialMap();
@@ -45,6 +45,15 @@ describe("resizeMap", () => {
     expect(() => resizeMap(map, 7, 8, "top-left")).toThrow(RangeError);
     expect(() => resizeMap(map, 8, 201, "top-left")).toThrow(RangeError);
     expect(() => resizeMap(map, 8.5, 8, "top-left")).toThrow(RangeError);
+  });
+
+  it("computes offsets for all nine anchor positions", () => {
+    const anchors = ["top-left", "top", "top-right", "left", "center", "right", "bottom-left", "bottom", "bottom-right"] as const;
+    expect(anchors.map((anchor) => getResizeOffsets(8, 8, 10, 10, anchor))).toEqual([
+      { column: 0, row: 0 }, { column: 1, row: 0 }, { column: 2, row: 0 },
+      { column: 0, row: 1 }, { column: 1, row: 1 }, { column: 2, row: 1 },
+      { column: 0, row: 2 }, { column: 1, row: 2 }, { column: 2, row: 2 },
+    ]);
   });
 });
 

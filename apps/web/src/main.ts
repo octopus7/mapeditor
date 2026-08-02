@@ -1,7 +1,8 @@
 import "./styles.css";
 import {
-  cellIndex, cloneMap, createInitialMap, deserializeMap, moveProp, paintGround, placeProp, serializeMap,
-  type GroundType, type MapDocument, type PropType,
+  cellIndex, cloneMap, createInitialMap, deserializeMap, IMAGE_MAX_SCALE, IMAGE_MIN_SCALE, moveImage,
+  moveProp, paintGround, placeImage, placeProp, removeImage, serializeMap, updateImageTransform,
+  type GroundType, type MapDocument, type MapImagePlacement, type PropType,
 } from "./editor-model";
 import { getBridgeConnectionShape, getPropNeighborMask, getTransitionLayers, NEIGHBOR_MASK } from "./autotile";
 import {
@@ -9,7 +10,7 @@ import {
   type AuthSession, type AvatarIcon,
 } from "./auth-client";
 import { ImageLibraryClient, ImageLibraryError, type ImageAsset } from "./image-library";
-import { MapStorageClient, resizeMap } from "./map-library";
+import { getResizeOffsets, MAX_MAP_SIZE, MIN_MAP_SIZE, MapStorageClient, resizeMap, type ResizeAnchor } from "./map-library";
 import { formatDeploymentTime, parseDeploymentMetadata } from "./deployment-meta";
 
 const CELL_SIZE = 36;
@@ -40,11 +41,17 @@ const propOptions: Array<{ id: PropType; label: string; image: string }> = [
   { id: "fallen-log", label: "쓰러진 통나무", image: "/assets/props/fallen-log.png" },
   { id: "footbridge", label: "나무다리", image: "/assets/props/footbridge.png" },
 ];
-type Layer = "ground" | "prop";
+type Layer = "ground" | "prop" | "image";
 type PropMode = "place" | "move" | "erase";
 type CellPosition = { column: number; row: number };
 type MovingProp = {
   prop: PropType;
+  fromColumn: number;
+  fromRow: number;
+  target: CellPosition | null;
+};
+type MovingImage = {
+  index: number;
   fromColumn: number;
   fromRow: number;
   target: CellPosition | null;
@@ -60,6 +67,13 @@ let isDrawing = false;
 let strokeChanged = false;
 let propMode: PropMode = "place";
 let movingProp: MovingProp | null = null;
+let imageMode: PropMode = "place";
+let movingImage: MovingImage | null = null;
+let selectedImageId: string | null = null;
+let selectedImagePlacementIndex: number | null = null;
+let selectedImageRotation = 0;
+let selectedImageScale = 2;
+let imageTransformChanged = false;
 let lastPaintedCell = "";
 let history: MapDocument[] = [];
 let future: MapDocument[] = [];
@@ -68,6 +82,11 @@ let authClient: AuthClient | null = null;
 let imageLibraryClient: ImageLibraryClient | null = null;
 let mapStorageClient: MapStorageClient | null = null;
 let authSession: AuthSession | null = null;
+let imageAssets: ImageAsset[] = [];
+let imageAssetsLoaded = false;
+let imageAssetsLoading = false;
+const imageAssetsById = new Map<string, ImageAsset>();
+const imageRenderImages = new Map<string, HTMLImageElement>();
 let googleClientId = "";
 let googleIdentityLoadPromise: Promise<void> | null = null;
 let fileMenuOpen = false;
@@ -127,8 +146,9 @@ document.querySelector<HTMLDivElement>("#app")!.innerHTML = `
       <aside class="tools-panel" aria-label="타일 도구">
         <div class="panel-heading"><span class="eyebrow">PALETTE</span><h2>지도 재료</h2></div>
         <div class="layer-tabs" role="tablist" aria-label="편집 레이어">
-          <button class="layer-tab active" data-layer="ground">바닥 타일</button>
+          <button class="layer-tab active" data-layer="ground">타일</button>
           <button class="layer-tab" data-layer="prop">사물</button>
+          <button class="layer-tab" data-layer="image">이미지</button>
         </div>
         <section class="palette-section" id="ground-palette">
           <div class="section-label"><span>GROUND</span><span>4종</span></div>
@@ -155,6 +175,24 @@ document.querySelector<HTMLDivElement>("#app")!.innerHTML = `
                 <img src="${item.image}" alt="" /><span>${item.label}</span>
               </button>`).join("")}
           </div>
+        </section>
+        <section class="palette-section hidden" id="image-palette">
+          <div class="section-label"><span>IMAGE MATERIALS</span><span id="image-material-count"></span></div>
+          <p class="image-palette-message" id="image-palette-message">로그인하면 저장한 이미지를 재료로 사용할 수 있습니다.</p>
+          <div class="image-material-grid" id="image-material-grid"></div>
+          <div class="image-transform-controls" aria-label="이미지 변환 설정">
+            <div class="section-label"><span>TRANSFORM</span><span id="image-transform-summary">0° · 200%</span></div>
+            <label class="range-control" for="image-rotation"><span>회전</span><output id="image-rotation-value">0°</output><input id="image-rotation" type="range" min="0" max="345" step="15" value="0" /></label>
+            <label class="range-control" for="image-scale"><span>스케일</span><output id="image-scale-value">200%</output><input id="image-scale" type="range" min="25" max="600" step="25" value="200" /></label>
+            <button class="button ghost image-transform-reset" type="button" id="reset-image-transform">변환 초기화</button>
+          </div>
+          <div class="section-label"><span>EDIT MODE</span><span id="image-mode-label">배치</span></div>
+          <div class="prop-mode-list" role="group" aria-label="이미지 편집 모드">
+            <button class="prop-mode active" data-image-mode="place" aria-pressed="true">배치</button>
+            <button class="prop-mode" data-image-mode="move" aria-pressed="false">이동</button>
+            <button class="prop-mode" data-image-mode="erase" aria-pressed="false">지우기</button>
+          </div>
+          <p class="prop-mode-hint" id="image-mode-hint">이미지를 고른 뒤 맵을 클릭하면 배치합니다.</p>
         </section>
         <div class="tool-tip"><span>TIP</span> 사물은 배치·이동·지우개 모드로 편집합니다. 바닥 타일에서는 오른쪽 클릭으로 지울 수 있어요.</div>
       </aside>
@@ -253,13 +291,25 @@ document.querySelector<HTMLDivElement>("#app")!.innerHTML = `
       <div class="dialog-actions"><button class="button ghost" value="cancel">닫기</button></div>
     </form>
   </dialog>
-  <dialog id="resize-map-dialog" class="editor-dialog">
+  <dialog id="resize-map-dialog" class="editor-dialog resize-map-dialog">
     <form method="dialog">
       <h2>맵 크기 조정</h2>
-      <p class="dialog-note">새 크기를 입력하면 현재 셀을 기준 위치에 맞춰 보존합니다.</p>
+      <p class="dialog-note">포토샵 캔버스처럼 새 영역을 지정합니다. 기본 기준은 가운데이며, 적용 전 초록색은 추가 영역, 붉은색은 잘리는 영역입니다.</p>
       <div class="resize-fields"><label for="resize-columns">가로<input id="resize-columns" type="number" min="8" max="200" /></label><label for="resize-rows">세로<input id="resize-rows" type="number" min="8" max="200" /></label></div>
-      <label for="resize-anchor">기준 위치</label>
-      <select id="resize-anchor"><option value="center">가운데</option><option value="top-left">왼쪽 위</option><option value="top">위쪽 가운데</option><option value="top-right">오른쪽 위</option><option value="left">왼쪽 가운데</option><option value="right">오른쪽 가운데</option><option value="bottom-left">왼쪽 아래</option><option value="bottom">아래쪽 가운데</option><option value="bottom-right">오른쪽 아래</option></select>
+      <fieldset class="resize-anchor-fieldset"><legend>기존 맵을 붙일 기준 위치</legend><input id="resize-anchor" type="hidden" value="center" />
+        <div class="resize-anchor-grid" role="group" aria-label="기존 맵 기준 위치">
+          <button type="button" class="resize-anchor-option" data-resize-anchor="top-left" aria-label="왼쪽 위">↖<small>왼쪽 위</small></button>
+          <button type="button" class="resize-anchor-option" data-resize-anchor="top" aria-label="위쪽 가운데">↑<small>위쪽 가운데</small></button>
+          <button type="button" class="resize-anchor-option" data-resize-anchor="top-right" aria-label="오른쪽 위">↗<small>오른쪽 위</small></button>
+          <button type="button" class="resize-anchor-option" data-resize-anchor="left" aria-label="왼쪽 가운데">←<small>왼쪽 가운데</small></button>
+          <button type="button" class="resize-anchor-option active" data-resize-anchor="center" aria-label="가운데" aria-pressed="true">＋<small>가운데</small></button>
+          <button type="button" class="resize-anchor-option" data-resize-anchor="right" aria-label="오른쪽 가운데">→<small>오른쪽 가운데</small></button>
+          <button type="button" class="resize-anchor-option" data-resize-anchor="bottom-left" aria-label="왼쪽 아래">↙<small>왼쪽 아래</small></button>
+          <button type="button" class="resize-anchor-option" data-resize-anchor="bottom" aria-label="아래쪽 가운데">↓<small>아래쪽 가운데</small></button>
+          <button type="button" class="resize-anchor-option" data-resize-anchor="bottom-right" aria-label="오른쪽 아래">↘<small>오른쪽 아래</small></button>
+        </div>
+      </fieldset>
+      <div class="resize-preview-wrap"><canvas id="resize-preview" class="resize-preview" aria-label="맵 크기 조정 미리보기"></canvas><div class="resize-preview-legend"><span class="resize-preview-grow">늘어나는 영역</span><span class="resize-preview-crop">잘리는 영역</span></div></div>
       <p class="dialog-message" id="resize-map-message"></p>
       <div class="dialog-actions"><button class="button ghost" value="cancel">취소</button><button class="button primary" type="button" id="confirm-resize-map">적용</button></div>
     </form>
@@ -455,6 +505,27 @@ function drawFootbridge(column: number, row: number, image: HTMLImageElement, si
   context.drawImage(image, -size / 2, -size / 2, size, size);
   context.restore();
 }
+function drawImagePlacement(placement: MapImagePlacement, opacity = 1, selected = false): void {
+  const image = imageRenderImages.get(placement.imageId);
+  if (!image?.complete || image.naturalWidth === 0 || image.naturalHeight === 0) return;
+  const width = CELL_SIZE * placement.scale;
+  const height = width * image.naturalHeight / image.naturalWidth;
+  const centerX = placement.column * CELL_SIZE + CELL_SIZE / 2;
+  const centerY = placement.row * CELL_SIZE + CELL_SIZE / 2;
+  context.save();
+  context.globalAlpha = opacity;
+  context.translate(centerX, centerY);
+  context.rotate(placement.rotation * Math.PI / 180);
+  context.drawImage(image, -width / 2, -height / 2, width, height);
+  if (selected) {
+    context.strokeStyle = "rgba(199, 144, 78, .95)";
+    context.lineWidth = 2;
+    context.setLineDash([5, 4]);
+    context.strokeRect(-width / 2, -height / 2, width, height);
+    context.setLineDash([]);
+  }
+  context.restore();
+}
 function render(): void {
   context.clearRect(0, 0, canvas.width, canvas.height);
   for (let row = 0; row < map.rows; row += 1) for (let column = 0; column < map.columns; column += 1) {
@@ -466,8 +537,18 @@ function render(): void {
     if (movingProp && movingProp.fromColumn === column && movingProp.fromRow === row) continue;
     drawProp(column, row, prop);
   }
+  map.images.forEach((image, index) => {
+    if (movingImage?.index === index) return;
+    drawImagePlacement(image, 1, selectedLayer === "image" && selectedImagePlacementIndex === index);
+  });
   if (movingProp?.target) {
     drawProp(movingProp.target.column, movingProp.target.row, movingProp.prop, .62);
+  }
+  if (movingImage?.target) {
+    const image = map.images[movingImage.index];
+    if (image) {
+      drawImagePlacement({ ...image, column: movingImage.target.column, row: movingImage.target.row }, .62, true);
+    }
   }
   if (gridVisible) {
     context.save(); context.strokeStyle = "rgba(21,45,29,.17)"; context.lineWidth = 1; context.beginPath();
@@ -790,6 +871,114 @@ function renderImageLibrary(items: readonly ImageAsset[]): void {
   }
   list.append(grid);
 }
+function setImagePaletteMessage(message: string, kind: "error" | "" = ""): void {
+  const target = document.querySelector<HTMLParagraphElement>("#image-palette-message");
+  if (!target) return;
+  target.textContent = message;
+  target.classList.toggle("is-error", kind === "error");
+}
+function cacheImageForMap(asset: ImageAsset): void {
+  imageAssetsById.set(asset.id, asset);
+  if (imageRenderImages.has(asset.id)) return;
+  const image = new Image();
+  image.crossOrigin = "anonymous";
+  image.referrerPolicy = "no-referrer";
+  image.src = asset.originalUrl;
+  image.addEventListener("load", render);
+  imageRenderImages.set(asset.id, image);
+}
+function syncImageTransformControls(): void {
+  const rotation = document.querySelector<HTMLInputElement>("#image-rotation");
+  const scale = document.querySelector<HTMLInputElement>("#image-scale");
+  const rotationValue = document.querySelector<HTMLOutputElement>("#image-rotation-value");
+  const scaleValue = document.querySelector<HTMLOutputElement>("#image-scale-value");
+  const summary = document.querySelector<HTMLSpanElement>("#image-transform-summary");
+  if (!rotation || !scale || !rotationValue || !scaleValue || !summary) return;
+  const rotationText = `${Math.round(selectedImageRotation)}°`;
+  const scaleText = `${Math.round(selectedImageScale * 100)}%`;
+  rotation.value = String(Math.round(selectedImageRotation));
+  scale.value = String(Math.round(selectedImageScale * 100));
+  rotationValue.value = rotationText;
+  scaleValue.value = scaleText;
+  summary.textContent = `${rotationText} · ${scaleText}`;
+  const disabled = !selectedImageId && selectedImagePlacementIndex === null;
+  rotation.disabled = disabled;
+  scale.disabled = disabled;
+  const reset = document.querySelector<HTMLButtonElement>("#reset-image-transform");
+  if (reset) reset.disabled = disabled;
+}
+function renderImageMaterials(): void {
+  const grid = document.querySelector<HTMLDivElement>("#image-material-grid");
+  const count = document.querySelector<HTMLSpanElement>("#image-material-count");
+  if (!grid || !count) return;
+  grid.replaceChildren();
+  count.textContent = imageAssets.length ? `${imageAssets.length}개` : "";
+  if (!authSession || !imageLibraryClient) {
+    setImagePaletteMessage("로그인하면 저장한 이미지를 재료로 사용할 수 있습니다.");
+    syncImageTransformControls();
+    return;
+  }
+  if (imageAssetsLoading) {
+    setImagePaletteMessage("저장한 이미지를 불러오는 중입니다.");
+    syncImageTransformControls();
+    return;
+  }
+  if (imageAssets.length === 0) {
+    setImagePaletteMessage(imageAssetsLoaded ? "저장한 이미지가 없습니다. 내 이미지에서 먼저 저장해 주세요." : "이미지 재료를 불러올 준비 중입니다.");
+    syncImageTransformControls();
+    return;
+  }
+  setImagePaletteMessage(selectedImageId ? "이미지를 고른 뒤 맵을 클릭하면 배치합니다." : "배치할 이미지를 선택해 주세요.");
+  for (const asset of imageAssets) {
+    const button = document.createElement("button");
+    button.type = "button";
+    button.className = "image-material-option";
+    button.dataset.imageId = asset.id;
+    button.title = asset.originalFilename;
+    button.classList.toggle("selected", selectedImageId === asset.id);
+    button.setAttribute("aria-pressed", String(selectedImageId === asset.id));
+    const image = document.createElement("img");
+    image.src = asset.thumbnailUrl;
+    image.alt = asset.originalFilename;
+    image.loading = "lazy";
+    image.referrerPolicy = "no-referrer";
+    const label = document.createElement("span");
+    label.textContent = asset.originalFilename;
+    button.append(image, label);
+    button.addEventListener("click", () => {
+      selectedImageId = asset.id;
+      selectedImagePlacementIndex = null;
+      setImageMode("place");
+      renderImageMaterials();
+      syncImageTransformControls();
+    });
+    grid.append(button);
+  }
+  syncImageTransformControls();
+}
+async function refreshImageMaterials(): Promise<void> {
+  if (!authSession || !imageLibraryClient || imageAssetsLoading || imageAssetsLoaded) {
+    renderImageMaterials();
+    return;
+  }
+  imageAssetsLoading = true;
+  renderImageMaterials();
+  try {
+    const result = await imageLibraryClient.listImages(authSession.token);
+    imageAssets = [...result.images];
+    imageAssetsById.clear();
+    for (const asset of imageAssets) cacheImageForMap(asset);
+    imageAssetsLoaded = true;
+    renderImageMaterials();
+    render();
+  } catch (error) {
+    imageAssetsLoaded = false;
+    setImagePaletteMessage(error instanceof Error ? error.message : "이미지 재료를 불러오지 못했습니다.", "error");
+  } finally {
+    imageAssetsLoading = false;
+    renderImageMaterials();
+  }
+}
 function renderStandaloneImageLibraryPage(): void {
   document.title = "내 이미지 · Forest Map Editor";
   document.querySelector<HTMLDivElement>("#app")!.innerHTML = `
@@ -881,17 +1070,151 @@ async function uploadSelectedImage(): Promise<void> {
     button.disabled = false;
   }
 }
+const RESIZE_ANCHORS = [
+  "top-left", "top", "top-right", "left", "center", "right", "bottom-left", "bottom", "bottom-right",
+] as const;
+type ResizeAnchorId = (typeof RESIZE_ANCHORS)[number];
+
+const resizePreviewGroundColors: Record<GroundType, string> = {
+  grass: "#78a467", dirt: "#b18759", stone: "#96998d", water: "#5a9eaa",
+};
+
+function setResizeAnchor(anchor: ResizeAnchorId): void {
+  const input = document.querySelector<HTMLInputElement>("#resize-anchor");
+  if (!input) return;
+  input.value = anchor;
+  document.querySelectorAll<HTMLButtonElement>("[data-resize-anchor]").forEach((button) => {
+    const active = button.dataset.resizeAnchor === anchor;
+    button.classList.toggle("active", active);
+    button.setAttribute("aria-pressed", String(active));
+  });
+  renderResizePreview();
+}
+
+function renderResizePreview(): void {
+  const preview = document.querySelector<HTMLCanvasElement>("#resize-preview");
+  const columnsInput = document.querySelector<HTMLInputElement>("#resize-columns");
+  const rowsInput = document.querySelector<HTMLInputElement>("#resize-rows");
+  const anchorInput = document.querySelector<HTMLInputElement>("#resize-anchor");
+  if (!preview || !columnsInput || !rowsInput || !anchorInput) return;
+
+  const width = preview.clientWidth || 640;
+  const height = preview.clientHeight || 230;
+  const devicePixelRatio = window.devicePixelRatio || 1;
+  const pixelWidth = Math.max(1, Math.floor(width * devicePixelRatio));
+  const pixelHeight = Math.max(1, Math.floor(height * devicePixelRatio));
+  if (preview.width !== pixelWidth || preview.height !== pixelHeight) {
+    preview.width = pixelWidth;
+    preview.height = pixelHeight;
+  }
+  const previewContext = preview.getContext("2d");
+  if (!previewContext) return;
+  previewContext.setTransform(devicePixelRatio, 0, 0, devicePixelRatio, 0, 0);
+  previewContext.clearRect(0, 0, width, height);
+  previewContext.fillStyle = "#dfe2d8";
+  previewContext.fillRect(0, 0, width, height);
+
+  const columns = Number(columnsInput.value);
+  const rows = Number(rowsInput.value);
+  if (!Number.isInteger(columns) || !Number.isInteger(rows) || columns < MIN_MAP_SIZE || rows < MIN_MAP_SIZE || columns > MAX_MAP_SIZE || rows > MAX_MAP_SIZE) {
+    previewContext.fillStyle = "#a24f43";
+    previewContext.font = "600 12px Segoe UI, sans-serif";
+    previewContext.fillText(`크기는 ${MIN_MAP_SIZE}~${MAX_MAP_SIZE} 사이의 정수여야 합니다.`, 16, height / 2);
+    return;
+  }
+
+  const anchor = anchorInput.value as ResizeAnchor;
+  const offsets = getResizeOffsets(map.columns, map.rows, columns, rows, anchor);
+  const sourceX = offsets.column;
+  const sourceY = offsets.row;
+  const minX = Math.min(0, sourceX);
+  const minY = Math.min(0, sourceY);
+  const maxX = Math.max(columns, sourceX + map.columns);
+  const maxY = Math.max(rows, sourceY + map.rows);
+  const worldWidth = maxX - minX;
+  const worldHeight = maxY - minY;
+  const scale = Math.min((width - 28) / worldWidth, (height - 38) / worldHeight);
+  const originX = (width - worldWidth * scale) / 2 - minX * scale;
+  const originY = (height - worldHeight * scale) / 2 - minY * scale;
+  const toX = (value: number) => originX + value * scale;
+  const toY = (value: number) => originY + value * scale;
+  const targetLeft = toX(0);
+  const targetTop = toY(0);
+  const targetWidth = columns * scale;
+  const targetHeight = rows * scale;
+  const sourceLeft = toX(sourceX);
+  const sourceTop = toY(sourceY);
+  const sourceWidth = map.columns * scale;
+  const sourceHeight = map.rows * scale;
+
+  previewContext.fillStyle = "rgba(248, 249, 242, .9)";
+  previewContext.fillRect(targetLeft, targetTop, targetWidth, targetHeight);
+  previewContext.globalAlpha = .82;
+  for (let row = 0; row < map.rows; row += 1) {
+    for (let column = 0; column < map.columns; column += 1) {
+      const cell = map.cells[cellIndex(map, column, row)];
+      previewContext.fillStyle = resizePreviewGroundColors[cell.ground];
+      previewContext.fillRect(toX(sourceX + column), toY(sourceY + row), scale + .5, scale + .5);
+      if (cell.prop) {
+        previewContext.fillStyle = "rgba(35, 55, 42, .72)";
+        previewContext.beginPath();
+        previewContext.arc(toX(sourceX + column + .5), toY(sourceY + row + .5), Math.max(1.5, scale * .16), 0, Math.PI * 2);
+        previewContext.fill();
+      }
+    }
+  }
+  previewContext.globalAlpha = 1;
+
+  previewContext.save();
+  previewContext.filter = "blur(2px)";
+  previewContext.globalAlpha = .62;
+  for (let row = 0; row < rows; row += 1) {
+    for (let column = 0; column < columns; column += 1) {
+      const outsideSource = column < sourceX || column >= sourceX + map.columns || row < sourceY || row >= sourceY + map.rows;
+      if (!outsideSource) continue;
+      previewContext.fillStyle = "#4f9e5b";
+      previewContext.fillRect(toX(column), toY(row), scale + .5, scale + .5);
+    }
+  }
+  for (let row = 0; row < map.rows; row += 1) {
+    for (let column = 0; column < map.columns; column += 1) {
+      const targetColumn = sourceX + column;
+      const targetRow = sourceY + row;
+      const outsideTarget = targetColumn < 0 || targetColumn >= columns || targetRow < 0 || targetRow >= rows;
+      if (!outsideTarget) continue;
+      previewContext.fillStyle = "#bc4e45";
+      previewContext.fillRect(toX(targetColumn), toY(targetRow), scale + .5, scale + .5);
+    }
+  }
+  previewContext.restore();
+
+  previewContext.globalAlpha = 1;
+  previewContext.setLineDash([5, 4]);
+  previewContext.lineWidth = 1.5;
+  previewContext.strokeStyle = "#3f8b4c";
+  previewContext.strokeRect(targetLeft + .75, targetTop + .75, Math.max(0, targetWidth - 1.5), Math.max(0, targetHeight - 1.5));
+  previewContext.strokeStyle = "rgba(167, 72, 63, .8)";
+  previewContext.strokeRect(sourceLeft + .75, sourceTop + .75, Math.max(0, sourceWidth - 1.5), Math.max(0, sourceHeight - 1.5));
+  previewContext.setLineDash([]);
+  previewContext.fillStyle = "#31583a";
+  previewContext.font = "600 10px Segoe UI, sans-serif";
+  previewContext.fillText(`새 영역 ${columns} × ${rows}`, targetLeft + 7, targetTop + 14);
+}
+
 function openResizeMapDialog(): void {
   setFileMenuOpen(false);
   (document.querySelector<HTMLInputElement>("#resize-columns")!).value = String(map.columns);
   (document.querySelector<HTMLInputElement>("#resize-rows")!).value = String(map.rows);
+  setResizeAnchor("center");
   setDialogMessage("#resize-map-message", "");
-  document.querySelector<HTMLDialogElement>("#resize-map-dialog")!.showModal();
+  const dialog = document.querySelector<HTMLDialogElement>("#resize-map-dialog")!;
+  dialog.showModal();
+  requestAnimationFrame(renderResizePreview);
 }
 function applyMapResize(): void {
   const columns = Number(document.querySelector<HTMLInputElement>("#resize-columns")!.value);
   const rows = Number(document.querySelector<HTMLInputElement>("#resize-rows")!.value);
-  const anchor = document.querySelector<HTMLSelectElement>("#resize-anchor")!.value as Parameters<typeof resizeMap>[3];
+  const anchor = document.querySelector<HTMLInputElement>("#resize-anchor")!.value as ResizeAnchor;
   try {
     replaceMap(resizeMap(map, columns, rows, anchor));
     document.querySelector<HTMLDialogElement>("#resize-map-dialog")!.close();
@@ -1361,6 +1684,10 @@ document.querySelector("#open-image-library")!.addEventListener("click", () => {
 document.querySelector("#open-resize-map")!.addEventListener("click", openResizeMapDialog);
 document.querySelector("#confirm-map-save")!.addEventListener("click", () => { void saveMapToCloud(); });
 document.querySelector("#confirm-resize-map")!.addEventListener("click", applyMapResize);
+document.querySelectorAll<HTMLButtonElement>("[data-resize-anchor]").forEach((button) => button.addEventListener("click", () => {
+  setResizeAnchor(button.dataset.resizeAnchor as ResizeAnchorId);
+}));
+document.querySelectorAll<HTMLInputElement>("#resize-columns, #resize-rows").forEach((input) => input.addEventListener("input", renderResizePreview));
 document.querySelector("#file-menu-toggle")!.addEventListener("click", (event) => {
   event.stopPropagation();
   setFileMenuOpen(!fileMenuOpen);

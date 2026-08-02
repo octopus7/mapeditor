@@ -409,3 +409,10 @@
 - Made each thumbnail link open the original image URL in a new tab.
 - Added radio-style single selection for the outer image card, including selected color, focus styling, and Enter/Space keyboard support.
 - Confirmed selecting another card clears the previous selection, passed static checks, and deployed the updated Pages bundle.
+
+## Add Photoshop-style map canvas resize preview 2026-08-02 21:55:00 ~ 2026-08-02 22:00:12 (5분 12초)
+
+- Added a 3×3 anchor control with center selected by default for all nine placement positions.
+- Added live canvas preview while editing dimensions, showing retained map cells, blurred green growth areas, and blurred red cropped areas before applying.
+- Centralized resize offset calculation and added coverage for all nine anchor offsets.
+- Passed web checks (42), deployed Worker and Pages, and verified the production bundle and Worker health.

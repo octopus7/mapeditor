@@ -1,4 +1,4 @@
-import { deserializeMap, serializeMap, type MapCell, type MapDocument } from "./editor-model";
+import { deserializeMap, serializeMap, type MapCell, type MapDocument, type MapImagePlacement } from "./editor-model";
 
 export interface SavedMapSummary {
   id: string;
@@ -145,6 +145,25 @@ function getOffset(nextSize: number, currentSize: number, anchor: "left" | "cent
   return Math.floor(difference / 2);
 }
 
+export interface ResizeOffsets {
+  column: number;
+  row: number;
+}
+
+export function getResizeOffsets(
+  currentColumns: number,
+  currentRows: number,
+  columns: number,
+  rows: number,
+  anchor: ResizeAnchor = "center",
+): ResizeOffsets {
+  const parts = getAnchorParts(anchor);
+  return {
+    column: getOffset(columns, currentColumns, parts.horizontal),
+    row: getOffset(rows, currentRows, parts.vertical),
+  };
+}
+
 function validateMapSize(value: number, label: string): void {
   if (!Number.isInteger(value) || value < MIN_MAP_SIZE || value > MAX_MAP_SIZE) {
     throw new RangeError(`${label} must be an integer between ${MIN_MAP_SIZE} and ${MAX_MAP_SIZE}`);
@@ -167,26 +186,32 @@ export function resizeMap(
     throw new Error("The source map has an invalid cell count");
   }
 
-  const parts = getAnchorParts(anchor);
-  const columnOffset = getOffset(columns, map.columns, parts.horizontal);
-  const rowOffset = getOffset(rows, map.rows, parts.vertical);
+  const offsets = getResizeOffsets(map.columns, map.rows, columns, rows, anchor);
   const cells: MapCell[] = Array.from({ length: columns * rows }, () => ({ ground: "grass", prop: null }));
 
   for (let row = 0; row < map.rows; row += 1) {
     for (let column = 0; column < map.columns; column += 1) {
-      const nextColumn = column + columnOffset;
-      const nextRow = row + rowOffset;
+      const nextColumn = column + offsets.column;
+      const nextRow = row + offsets.row;
       if (nextColumn < 0 || nextRow < 0 || nextColumn >= columns || nextRow >= rows) continue;
       const source = map.cells[row * map.columns + column];
       cells[nextRow * columns + nextColumn] = { ...source };
     }
   }
 
+  const images: MapImagePlacement[] = map.images.flatMap((image) => {
+    const nextColumn = image.column + offsets.column;
+    const nextRow = image.row + offsets.row;
+    if (nextColumn < 0 || nextRow < 0 || nextColumn >= columns || nextRow >= rows) return [];
+    return [{ ...image, column: nextColumn, row: nextRow }];
+  });
+
   return {
     ...map,
     columns,
     rows,
     cells,
+    images,
     updatedAt: new Date().toISOString(),
   };
 }
