@@ -7,7 +7,10 @@
   "workers_dev": true,
   "preview_urls": false,
   "vars": {
-    "ALLOWED_ORIGINS": "https://mapedit.pages.dev,http://127.0.0.1:4173,http://localhost:4173"
+    "ALLOWED_ORIGINS": "https://mapedit.pages.dev,http://127.0.0.1:4173,http://localhost:4173",
+    "DEVELOPER_DEBUG_IPS": "14.35.239.105",
+    "MEME_UPLOAD_BASE_URL": "https://meme-admin.devtuna.win",
+    "MEME_IMAGE_ORIGIN": "https://meme.devtuna.win"
   },
   "d1_databases": [
     {
@@ -18,7 +21,7 @@
     }
   ],
   "secrets": {
-    "required": ["GOOGLE_CLIENT_ID", "SESSION_SECRET"]
+    "required": ["GOOGLE_CLIENT_ID", "SESSION_SECRET", "MEME_UPLOAD_TOKEN"]
   },
   "observability": {
     "enabled": true,

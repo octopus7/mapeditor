@@ -1,8 +1,16 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import {
   createApiHandler,
   DEFAULT_DISPLAY_NAME,
+  normalizeMapPayload,
   parseAllowedOrigins,
+  parseDeveloperDebugIps,
+  type ImageAsset,
+  type ImageAssetInput,
+  type ImageAssetRepository,
+  type MapDocument,
+  type MapDocumentInput,
+  type MapRepository,
   validateAvatarIcon,
   validateDisplayName,
   type AvatarIcon,
@@ -57,10 +65,86 @@ class InMemoryUserRepository implements UserRepository {
   }
 }
 
+class InMemoryImageAssetRepository implements ImageAssetRepository {
+  readonly images: ImageAsset[] = [];
+
+  async findByIdempotencyKey(ownerUserId: string, idempotencyKey: string): Promise<ImageAsset | null> {
+    return this.images.find((image) =>
+      image.id === `${ownerUserId}:${idempotencyKey}`
+    ) ?? null;
+  }
+
+  async create(input: ImageAssetInput): Promise<ImageAsset> {
+    const image = {
+      id: `${input.ownerUserId}:${input.idempotencyKey}`,
+      originalFilename: input.originalFilename,
+      hash: input.hash,
+      extension: input.extension,
+      mimeType: input.mimeType,
+      byteSize: input.byteSize,
+      originalUrl: input.originalUrl,
+      thumbnailUrl: input.thumbnailUrl,
+      createdAt: "2026-08-02 00:00:00",
+    } satisfies ImageAsset;
+    this.images.push(image);
+    return image;
+  }
+
+  async listByOwner(ownerUserId: string, limit: number): Promise<ImageAsset[]> {
+    return this.images
+      .filter((image) => image.id.startsWith(`${ownerUserId}:`))
+      .slice(0, limit);
+  }
+}
+
+class InMemoryMapRepository implements MapRepository {
+  readonly maps: Array<MapDocument & { ownerUserId: string }> = [];
+
+  async create(input: MapDocumentInput): Promise<MapDocument> {
+    const map = {
+      id: input.id,
+      ownerUserId: input.ownerUserId,
+      name: input.name,
+      payload: JSON.parse(input.payloadJson) as Record<string, unknown>,
+      createdAt: "2026-08-02 00:00:00",
+      updatedAt: "2026-08-02 00:00:00",
+    };
+    this.maps.push(map);
+    return map;
+  }
+
+  async update(
+    ownerUserId: string,
+    id: string,
+    name: string,
+    payloadJson: string,
+    _payloadBytes: number,
+  ): Promise<MapDocument | null> {
+    const existing = this.maps.find((map) => map.ownerUserId === ownerUserId && map.id === id);
+    if (!existing) return null;
+    existing.name = name;
+    existing.payload = JSON.parse(payloadJson) as Record<string, unknown>;
+    existing.updatedAt = "2026-08-02 00:01:00";
+    return existing;
+  }
+
+  async listByOwner(ownerUserId: string, limit: number): Promise<MapDocument[]> {
+    return this.maps.filter((map) => map.ownerUserId === ownerUserId).slice(0, limit);
+  }
+
+  async findById(ownerUserId: string, id: string): Promise<MapDocument | null> {
+    return this.maps.find((map) => map.ownerUserId === ownerUserId && map.id === id) ?? null;
+  }
+}
+
 function createTestApi() {
   const users = new InMemoryUserRepository();
+  const images = new InMemoryImageAssetRepository();
+  const maps = new InMemoryMapRepository();
   const handler = createApiHandler({
     createUserRepository: () => users,
+    createImageRepository: () => images,
+    createMapRepository: () => maps,
     verifyGoogleCredential: async () => ({
       subject: "google-subject-1",
       email: "editor@example.com",
@@ -68,10 +152,14 @@ function createTestApi() {
   });
   const env = {
     ALLOWED_ORIGINS,
+    DEVELOPER_DEBUG_IPS: "14.35.239.105",
     GOOGLE_CLIENT_ID: "test-client-id.apps.googleusercontent.com",
     SESSION_SECRET,
+    MEME_UPLOAD_BASE_URL: "https://meme-admin.devtuna.win",
+    MEME_IMAGE_ORIGIN: "https://meme.devtuna.win",
+    MEME_UPLOAD_TOKEN: "a-secure-test-meme-upload-token-with-at-least-32-bytes",
   } satisfies Omit<Env, "DB">;
-  return { env, handler, users };
+  return { env, handler, users, images, maps };
 }
 
 async function login(
@@ -117,6 +205,13 @@ describe("authentication helpers", () => {
     expect(origins.has(ALLOWED_ORIGIN)).toBe(true);
     expect(origins.has("http://localhost:4173")).toBe(true);
     expect(origins.has("https://example.com")).toBe(false);
+  });
+
+  it("parses the developer debug IP allow list", () => {
+    const ips = parseDeveloperDebugIps("14.35.239.105, 127.0.0.1");
+    expect(ips.has("14.35.239.105")).toBe(true);
+    expect(ips.has("127.0.0.1")).toBe(true);
+    expect(ips.has("192.0.2.1")).toBe(false);
   });
 });
 
@@ -214,5 +309,267 @@ describe("authentication API", () => {
       {} as ExecutionContext,
     );
     expect(response.status).toBe(413);
+  });
+
+  it("reports whether the request IP is allowlisted for developer diagnostics", async () => {
+    const { env, handler } = createTestApi();
+    const developerResponse = await handler.fetch!(
+      new Request("https://api.example.com/health", {
+        headers: { Origin: ALLOWED_ORIGIN, "CF-Connecting-IP": "14.35.239.105" },
+      }),
+      env as Env,
+      {} as ExecutionContext,
+    );
+    expect((await developerResponse.json() as { developerDebug: boolean }).developerDebug).toBe(true);
+
+    const regularResponse = await handler.fetch!(
+      new Request("https://api.example.com/health", {
+        headers: { Origin: ALLOWED_ORIGIN, "CF-Connecting-IP": "192.0.2.1" },
+      }),
+      env as Env,
+      {} as ExecutionContext,
+    );
+    expect((await regularResponse.json() as { developerDebug: boolean }).developerDebug).toBe(false);
+  });
+
+  it("runs detailed D1 diagnostics only for the allowlisted developer IP", async () => {
+    const { env, handler } = createTestApi();
+    const database = {
+      prepare(query: string) {
+        return {
+          all: async () => query.includes("sqlite_master")
+            ? { results: [{ name: "d1_migrations" }, { name: "image_assets" }, { name: "maps" }, { name: "users" }] }
+            : { results: [] },
+          first: async () => ({ count: query.includes("d1_migrations") ? 5 : 2 }),
+        };
+      },
+    } as unknown as D1Database;
+
+    const response = await handler.fetch!(
+      new Request("https://api.example.com/health?d1=1", {
+        headers: { Origin: ALLOWED_ORIGIN, "CF-Connecting-IP": "14.35.239.105" },
+      }),
+      { ...env, DB: database } as Env,
+      {} as ExecutionContext,
+    );
+    expect(response.status).toBe(200);
+    const body = await response.json() as {
+      ok: boolean;
+      storage: string;
+      tables: Array<{ name: string; exists: boolean; rowCount: number }>;
+      migrationTable: { exists: boolean; rowCount: number };
+    };
+    expect(body.ok).toBe(true);
+    expect(body.storage).toBe("d1");
+    expect(body.tables).toEqual([
+      { name: "users", exists: true, rowCount: 2 },
+      { name: "image_assets", exists: true, rowCount: 2 },
+      { name: "maps", exists: true, rowCount: 2 },
+    ]);
+    expect(body.migrationTable).toEqual({ name: "d1_migrations", exists: true, rowCount: 5 });
+
+    const nonDeveloperResponse = await handler.fetch!(
+      new Request("https://api.example.com/health?d1=1", {
+        headers: { Origin: ALLOWED_ORIGIN, "CF-Connecting-IP": "192.0.2.1" },
+      }),
+      { ...env, DB: database } as Env,
+      {} as ExecutionContext,
+    );
+    expect(nonDeveloperResponse.status).toBe(404);
+  });
+
+  it("returns extra login diagnostics only to the allowlisted developer IP", async () => {
+    const { env, handler } = createTestApi();
+    const response = await handler.fetch!(
+      new Request("https://api.example.com/auth/google", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Origin: ALLOWED_ORIGIN,
+          "CF-Connecting-IP": "14.35.239.105",
+        },
+        body: JSON.stringify({ credential: "x".repeat(20_001) }),
+      }),
+      env as Env,
+      {} as ExecutionContext,
+    );
+    expect(response.status).toBe(413);
+    const body = await response.json() as {
+      error: { code: string; debug?: { status: number; path: string } };
+    };
+    expect(body.error.code).toBe("BODY_TOO_LARGE");
+    expect(body.error.debug?.status).toBe(413);
+    expect(body.error.debug?.path).toBe("/auth/google");
+
+    const nonDeveloperResponse = await handler.fetch!(
+      new Request("https://api.example.com/auth/google", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Origin: ALLOWED_ORIGIN,
+          "CF-Connecting-IP": "192.0.2.1",
+        },
+        body: JSON.stringify({ credential: "x".repeat(20_001) }),
+      }),
+      env as Env,
+      {} as ExecutionContext,
+    );
+    const nonDeveloperBody = await nonDeveloperResponse.json() as {
+      error: { debug?: unknown };
+    };
+    expect(nonDeveloperBody.error.debug).toBeUndefined();
+  });
+});
+
+describe("user-owned map and image APIs", () => {
+  it("requires a session for private maps and images", async () => {
+    const { env, handler } = createTestApi();
+    for (const path of ["/maps", "/images"]) {
+      const response = await handler.fetch!(
+        new Request(`https://api.example.com${path}`),
+        env as Env,
+        {} as ExecutionContext,
+      );
+      expect(response.status).toBe(401);
+      expect((await response.json() as { error: { code: string } }).error.code).toBe("AUTH_REQUIRED");
+    }
+  });
+
+  it("saves a JSON map payload and returns only the owner's map data", async () => {
+    const { env, handler } = createTestApi();
+    const session = await login(handler, env);
+    expect(normalizeMapPayload('{"width":2,"height":3}').payloadBytes).toBeGreaterThan(0);
+
+    const saveResponse = await handler.fetch!(
+      new Request("https://api.example.com/maps", {
+        method: "POST",
+        headers: {
+          Authorization: `Bearer ${session.token}`,
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({ name: "First map", payload: { width: 2, height: 3 } }),
+      }),
+      env as Env,
+      {} as ExecutionContext,
+    );
+    expect(saveResponse.status).toBe(201);
+    const saved = (await saveResponse.json()) as { map: MapDocument };
+    expect(saved.map.name).toBe("First map");
+    expect(saved.map.payload).toEqual({ width: 2, height: 3 });
+
+    const updateResponse = await handler.fetch!(
+      new Request(`https://api.example.com/maps/${saved.map.id}`, {
+        method: "PUT",
+        headers: {
+          Authorization: `Bearer ${session.token}`,
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({ name: "Updated map", payload: { width: 4, height: 5 } }),
+      }),
+      env as Env,
+      {} as ExecutionContext,
+    );
+    expect(updateResponse.status).toBe(200);
+    const updated = (await updateResponse.json()) as { map: MapDocument };
+    expect(updated.map.id).toBe(saved.map.id);
+    expect(updated.map.name).toBe("Updated map");
+    expect(updated.map.payload).toEqual({ width: 4, height: 5 });
+
+    const listResponse = await handler.fetch!(
+      new Request("https://api.example.com/maps", {
+        headers: { Authorization: `Bearer ${session.token}` },
+      }),
+      env as Env,
+      {} as ExecutionContext,
+    );
+    expect(listResponse.status).toBe(200);
+    expect(await listResponse.json()).toEqual({ maps: [updated.map] });
+
+    const singleResponse = await handler.fetch!(
+      new Request(`https://api.example.com/maps/${saved.map.id}`, {
+        headers: { Authorization: `Bearer ${session.token}` },
+      }),
+      env as Env,
+      {} as ExecutionContext,
+    );
+    expect(singleResponse.status).toBe(200);
+    expect(await singleResponse.json()).toEqual({ map: updated.map });
+  });
+
+  it("streams an image upload to the meme service and lists its own metadata", async () => {
+    const { env, handler } = createTestApi();
+    const session = await login(handler, env);
+    const hash = "a".repeat(64);
+    const upstream = vi.spyOn(globalThis, "fetch").mockImplementation(async (input, init) => {
+      expect(String(input)).toBe("https://meme-admin.devtuna.win/v1/images");
+      const headers = new Headers(init?.headers);
+      expect(headers.get("Authorization")).toBe(`Bearer ${env.MEME_UPLOAD_TOKEN}`);
+      expect(headers.get("Content-Type")).toBe("image/png");
+      expect(headers.get("Content-Length")).toBe("3");
+      expect(headers.get("Idempotency-Key")).toBe("upload-1");
+      expect(headers.get("X-Original-Filename")).toBe("map.png");
+      expect(init?.body).toBeTruthy();
+      return Response.json({
+        hash,
+        extension: "png",
+        mime_type: "image/png",
+        byte_size: 3,
+        original_url: `https://meme.devtuna.win/i/${hash}.png`,
+        thumbnail_url: `https://meme.devtuna.win/t/${hash}`,
+      }, { status: 201 });
+    });
+
+    try {
+      const uploadResponse = await handler.fetch!(
+        new Request("https://api.example.com/images", {
+          method: "POST",
+          headers: {
+            Authorization: `Bearer ${session.token}`,
+            "Content-Type": "image/png",
+            "Content-Length": "3",
+            "Idempotency-Key": "upload-1",
+            "X-Original-Filename": "map.png",
+          },
+          body: Uint8Array.from([1, 2, 3]),
+        }),
+        env as Env,
+        {} as ExecutionContext,
+      );
+      expect(uploadResponse.status).toBe(201);
+      const uploaded = (await uploadResponse.json()) as { image: ImageAsset; reused: boolean };
+      expect(uploaded.reused).toBe(false);
+      expect(uploaded.image.originalFilename).toBe("map.png");
+
+      const retryResponse = await handler.fetch!(
+        new Request("https://api.example.com/images", {
+          method: "POST",
+          headers: {
+            Authorization: `Bearer ${session.token}`,
+            "Content-Type": "image/png",
+            "Content-Length": "3",
+            "Idempotency-Key": "upload-1",
+            "X-Original-Filename": "map.png",
+          },
+          body: Uint8Array.from([1, 2, 3]),
+        }),
+        env as Env,
+        {} as ExecutionContext,
+      );
+      expect(retryResponse.status).toBe(200);
+      expect((await retryResponse.json() as { reused: boolean }).reused).toBe(true);
+      expect(upstream).toHaveBeenCalledTimes(1);
+
+      const listResponse = await handler.fetch!(
+        new Request("https://api.example.com/images", {
+          headers: { Authorization: `Bearer ${session.token}` },
+        }),
+        env as Env,
+        {} as ExecutionContext,
+      );
+      expect(listResponse.status).toBe(200);
+      expect((await listResponse.json() as { images: ImageAsset[] }).images).toHaveLength(1);
+    } finally {
+      upstream.mockRestore();
+    }
   });
 });

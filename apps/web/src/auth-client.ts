@@ -22,8 +22,17 @@ interface ApiErrorBody {
   error?: string | {
     code?: string;
     message?: string;
+    debug?: AuthDebugDetails;
   };
   message?: string;
+}
+
+export interface AuthDebugDetails {
+  requestId: string;
+  method: string;
+  path: string;
+  status: number;
+  cause?: string;
 }
 
 export class AuthApiError extends Error {
@@ -31,6 +40,7 @@ export class AuthApiError extends Error {
     readonly status: number,
     readonly code: string,
     message: string,
+    readonly debug?: AuthDebugDetails,
   ) {
     super(message);
     this.name = "AuthApiError";
@@ -87,6 +97,7 @@ export class AuthClient {
         response.status,
         nestedError?.code ?? (typeof body.error === "string" ? body.error : "REQUEST_FAILED"),
         nestedError?.message ?? body.message ?? "로그인 서버 요청에 실패했습니다.",
+        nestedError?.debug,
       );
     }
 

@@ -86,4 +86,26 @@ describe("AuthClient", () => {
       message: "표시 이름이 올바르지 않습니다.",
     }));
   });
+
+  it("preserves developer-only API diagnostics", async () => {
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue(new Response(JSON.stringify({
+      error: {
+        code: "INVALID_GOOGLE_TOKEN",
+        message: "Google 로그인 정보를 확인할 수 없습니다.",
+        debug: {
+          requestId: "ray-123",
+          method: "POST",
+          path: "/auth/google",
+          status: 401,
+          cause: "JWTClaimValidationFailed: unexpected aud claim",
+        },
+      },
+    }), { status: 401, headers: { "Content-Type": "application/json" } })));
+
+    const request = new AuthClient("https://api.example.com").login("google-id-token");
+    await expect(request).rejects.toEqual(expect.objectContaining({
+      code: "INVALID_GOOGLE_TOKEN",
+      debug: expect.objectContaining({ requestId: "ray-123", cause: expect.stringContaining("aud") }),
+    }));
+  });
 });

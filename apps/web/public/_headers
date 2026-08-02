@@ -9,3 +9,10 @@
 
 /index.html
   Cache-Control: no-cache
+
+/deployment-meta.json
+  Cache-Control: no-cache
+  Content-Type: application/json; charset=utf-8
+
+/diag/*
+  Cache-Control: no-cache

@@ -9,7 +9,7 @@ function Import-SecretValues {
 
     $resolvedPath = [System.IO.Path]::GetFullPath($Path)
     if (-not (Test-Path -LiteralPath $resolvedPath -PathType Leaf)) {
-        throw "시크릿 입력 파일을 찾을 수 없습니다: $resolvedPath"
+        throw "Secret input file was not found: $resolvedPath"
     }
 
     $values = @{}
@@ -41,7 +41,7 @@ function Get-RequiredSecretValue {
     )
 
     if (-not $Values.ContainsKey($Name) -or [string]::IsNullOrWhiteSpace($Values[$Name])) {
-        throw ".dev.vars의 $Name 값을 입력해야 합니다."
+        throw "A value for $Name is required in .dev.vars."
     }
     return [string]$Values[$Name]
 }

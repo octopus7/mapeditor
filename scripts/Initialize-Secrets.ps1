@@ -21,11 +21,11 @@ $resolvedTemplatePath = [System.IO.Path]::GetFullPath($TemplatePath)
 $resolvedSecretsPath = [System.IO.Path]::GetFullPath($SecretsPath)
 
 if (-not (Test-Path -LiteralPath $resolvedTemplatePath -PathType Leaf)) {
-    throw "시크릿 예시 파일을 찾을 수 없습니다: $resolvedTemplatePath"
+    throw "Secret template file was not found: $resolvedTemplatePath"
 }
 
 if (Test-Path -LiteralPath $resolvedSecretsPath) {
-    Write-Host "기존 시크릿 파일을 유지합니다: $resolvedSecretsPath"
+    Write-Host "Keeping the existing secrets file: $resolvedSecretsPath"
     return
 }
 
@@ -35,5 +35,5 @@ if (-not (Test-Path -LiteralPath $secretsDirectory -PathType Container)) {
 }
 
 Copy-Item -LiteralPath $resolvedTemplatePath -Destination $resolvedSecretsPath
-Write-Host "시크릿 파일을 생성했습니다: $resolvedSecretsPath"
-Write-Host '실제 값을 입력한 뒤 파일을 저장하세요. 이 파일의 내용은 Git에 포함되거나 출력되어서는 안 됩니다.'
+Write-Host "Created the secrets file: $resolvedSecretsPath"
+Write-Host 'Enter the real values and save the file. Never commit or print its contents.'

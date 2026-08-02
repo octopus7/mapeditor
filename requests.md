@@ -199,3 +199,116 @@
 - Canvas에 Path2D 전이 마스크를 연결해 풀·흙·돌·물 경계를 인접 지형에 따라 합성하고 저장 데이터 형식은 변경하지 않았다.
 - 타입 검사, API 검사, 테스트 20개와 프로덕션 빌드를 통과했으며 로컬 390px·768px와 운영 Pages에서 뷰포트·로그인 축약·확대·패닝을 확인했다.
 - 기본 HTML 캐시를 줄이기 위해 `/`와 `/index.html`에 `Cache-Control: no-cache`를 추가하고 Pages 운영 배포를 완료했다.
+
+## 개인 이미지·맵 저장 및 맵 크기 확장 구현 2026-08-02 18:22:00 ~ 2026-08-02 18:40:53 (18분 53초)
+
+- 외부 서비스 연동 문서를 검토하고 브라우저가 meme origin을 직접 호출하지 않도록 Worker 업로드 계약(`POST /v1/images`, raw bytes, 전용 bearer token, idempotency key, 응답 URL 검증)을 적용했다.
+- 로그인 사용자별 이미지 메타데이터와 맵 payload를 D1에 저장하도록 `image_assets`·`maps` 마이그레이션, 소유자 전용 목록·단건 조회·업데이트 API, 이미지 업로드·목록 API와 테스트를 추가했다.
+- 우측 파일 메뉴에 지도 저장, 다른 이름으로 저장, 저장한 지도 목록, 내 이미지, 맵 크기 조정 기능을 추가했다. 저장은 기존 레코드 업데이트, 다른 이름 저장은 새 레코드 생성으로 동작하며 게스트에게는 로그인 필요 안내만 표시한다.
+- 맵 크기 다이얼로그에서 8~200 셀 범위와 기준 위치를 선택해 기존 셀을 보존한 채 확장·축소하고, 이미지 다이얼로그에서 JPEG·PNG·WebP·GIF를 최대 10MB까지 업로드하고 개인 목록을 조회하도록 연결했다.
+- `.dev.vars`의 `MEME_UPLOAD_TOKEN` 입력 구조, `wrangler.jsonc`의 meme upload/image origin 변수와 배포 스크립트 검증을 추가했으며 시크릿 값은 기록하지 않았다.
+- 로컬 D1 마이그레이션은 적용 상태를 확인했고, 웹 정적 검사·빌드 34개 테스트와 API 테스트 12개, Wrangler Worker 타입 검사를 통과했다.
+- 실제 배포는 `.dev.vars`의 `MEME_UPLOAD_TOKEN`, 실제 HTTPS origin 값과 외부 meme 저장소의 문서상 `POST /v1/images` endpoint가 아직 없어 중단했다. 따라서 이번 작업에서는 커밋·푸시를 진행하지 않았다.
+
+## MEME 업로드 토큰 빈 항목 추가 2026-08-02 19:29:00 ~ 2026-08-02 19:30:25 (1분 25초)
+
+- Git 제외 파일 `.dev.vars`에 실제 값을 출력하거나 변경하지 않고 `MEME_UPLOAD_TOKEN=` 빈 항목을 추가했다.
+- 질문 기록에 실제 토큰과 meme origin은 아직 입력되지 않은 상태임을 반영했다.
+
+## meme origin 주소 반영 2026-08-02 19:31:40 ~ 2026-08-02 19:32:17 (37초)
+
+- `MEME_UPLOAD_BASE_URL`을 `https://meme-admin.devtuna.win`으로, `MEME_IMAGE_ORIGIN`을 `https://meme.devtuna.win`으로 반영했다.
+- Wrangler Worker 환경 타입을 새 설정으로 재생성했다. `MEME_UPLOAD_TOKEN`은 여전히 빈 값이며 실제 값은 출력하거나 기록하지 않았다.
+
+## 업로드 토큰 입력 확인과 배포 재시도 2026-08-02 19:33:40 ~ 2026-08-02 19:34:33 (53초)
+
+- `.dev.vars`의 `MEME_UPLOAD_TOKEN`이 64바이트로 입력된 것만 확인하고 값을 출력하지 않았다.
+- 실제 origin 주소에 맞춰 API 테스트 fixture를 갱신했고 웹 검사·빌드, API 테스트 12개와 Wrangler 타입 검증을 통과했다.
+- Worker 배포 권한 요청이 자동 검토 오류로 거절되어 원격 마이그레이션·배포·커밋·푸시는 진행하지 않았다.
+
+## 작업 경로 PowerShell 열기 2026-08-02 19:36:30 ~ 2026-08-02 19:37:54 (1분 24초)
+
+- `D:\github\mapeditor`를 현재 작업 경로로 사용하는 PowerShell 터미널을 Codex 앱에 열었다.
+
+## 외부 PowerShell 창 열기 요청 2026-08-02 19:38:10 ~ 2026-08-02 19:38:54 (44초)
+
+- 사용자가 Codex 내부 터미널이 아닌 별도 Windows PowerShell 창을 요청했다.
+- 데스크톱 창 실행 권한이 자동 승인 시스템 내부 오류로 거절되어, 외부 창에서 실행할 수 있는 명령을 안내한다.
+
+## 개발자 IP 진단 및 로그인 표시 안정화 2026-08-02 19:48:00 ~ 2026-08-02 19:52:02 (4분 2초)
+
+- `DEVELOPER_DEBUG_IPS` Worker 변수를 추가하고 `14.35.239.105`를 개발자 진단 허용 IP로 등록했다.
+- 허용 IP 요청에만 요청 ID·경로·상태·내부 원인 요약을 포함하고, 일반 사용자 응답에는 상세 진단을 제외하도록 API 오류 응답을 분리했다.
+- Google 로그인 실패 시 개발자 진단 다이얼로그를 표시하고, 일반 재시도 UI는 유지했다.
+- Google 로그인 위젯을 고정 크기·paint containment·clip 영역으로 격리해 iPad Safari에서 로딩 중 외부로 확대되거나 잘리지 않도록 보강했다.
+- Worker 타입, 웹 검사·빌드 35개 테스트, API 테스트 14개를 통과했다. Worker와 Pages 운영 재배포 및 커밋·푸시는 아직 진행하지 않았다.
+
+## 운영 배포 승인 재시도 2026-08-02 20:10:00 ~ 2026-08-02 20:11:34 (1분 34초)
+
+- 사용자의 배포 승인에 따라 `Deploy-Worker.ps1` 실행을 시도했다.
+- Codex 외부 실행 승인 계층에서 `Unknown parameter: namespace` 오류가 재발해 명령이 실행되지 않았다.
+- 우회 실행은 하지 않았으며 Worker·Pages 배포와 커밋·푸시는 진행하지 않았다.
+
+## Pages 배포 시각 표시 및 운영 주소 배포 수정 2026-08-02 20:14:00 ~ 2026-08-02 20:18:09 (4분 9초)
+
+- 정적 `deployment-meta.json` 파일을 추가하고 Pages 배포 스크립트가 UTC ISO 배포 시각을 산출물에 기록하도록 했다.
+- 브라우저의 `Intl.DateTimeFormat` 기본 locale·timezone을 사용해 페이지 하단에 사용자 현지 시간으로 배포 시각을 표시하도록 했다.
+- 배포 메타데이터 캐시를 사용하지 않도록 Pages 헤더를 추가했다.
+- Pages 스크립트의 `--branch main`을 제거해 해시 프리뷰 주소가 아닌 `mapedit.pages.dev` 운영 배포를 사용하도록 수정했다.
+- 웹 타입 검사·빌드와 38개 테스트를 통과했다. 외부 실행 승인 계층의 `Unknown parameter: namespace` 오류로 Pages 운영 업로드와 커밋·푸시는 진행하지 못했다.
+
+## 로그인 간략 실패 원인 점검 2026-08-02 20:18:30 ~ 2026-08-02 20:18:55 (25초)
+
+- 로그인 실패 화면에 개발자 진단 창이 나타나지 않는 현상을 확인했다.
+- 새 `debug` 응답을 포함하는 Worker 변경분이 아직 운영 Worker에 반영되지 않았거나, 접속 공인 IP가 `14.35.239.105`와 달라진 경우로 원인을 좁혔다.
+- Worker를 먼저 재배포하고 Pages를 다시 배포해야 하는 실행 순서를 안내할 준비를 했다.
+
+## Pages API 주소 파일화 및 통합 배포 스크립트 2026-08-02 20:19:00 ~ 2026-08-02 20:23:47 (4분 47초)
+
+- `.dev.vars`에 `MAPEDITOR_API_BASE_URL`을 추가하고 Pages 배포 스크립트가 인자 없이 해당 값을 읽도록 변경했다.
+- 명시적인 `-ApiBaseUrl` 인자는 기존처럼 일회성 덮어쓰기로 유지했다.
+- Worker 성공 후 Pages를 순서대로 배포하는 `scripts/Deploy-Production.ps1` 통합 스크립트를 추가했다.
+- 통합 스크립트의 도움말 실행과 `git diff --check`를 통과했다. 실제 운영 배포는 실행하지 않았다.
+
+## 로그인 오류와 D1 마이그레이션 의존성 점검 2026-08-02 20:24:30 ~ 2026-08-02 20:25:32 (1분 2초)
+
+- 로그인 쿼리가 `users`와 `avatar_icon`을 사용하고, 0001~0004 마이그레이션이 해당 구조를 만든다는 점을 확인했다.
+- 0005는 `maps`·`image_assets` 전용이므로 0005 누락 자체는 로그인 실패 원인이 아니며, 이전에 0005가 적용됐다면 앞선 마이그레이션도 순서상 적용된 것으로 판단했다.
+- 현재는 새 Worker가 배포되지 않아 상세 오류가 보이지 않는 상태를 우선 원인으로 안내했다.
+
+## PowerShell 배포 메시지 영문화 2026-08-02 20:26:00 ~ 2026-08-02 20:27:02 (1분 2초)
+
+- PowerShell 콘솔 인코딩에서 깨지던 배포·시크릿 초기화 스크립트의 한국어 출력과 오류 메시지를 영어로 변경했다.
+- Worker, Pages, 통합 배포, 시크릿 보조 스크립트의 도움말·문법 검사와 `git diff --check`를 통과했다.
+
+## 작업 커밋 시도 2026-08-02 20:27:20 ~ 2026-08-02 20:29:10 (1분 50초)
+
+- 웹·API 정적 검사, 웹 38개 테스트와 API 14개 테스트를 통과했다.
+- `.git` 인덱스가 보호된 쓰기 권한으로 인해 스테이징에 실패했다.
+- 외부 Git 쓰기 권한 승인도 `Unknown parameter: namespace` 오류로 거절되어 커밋을 생성하지 못했다.
+
+## 개발자 접속 상태 표시 2026-08-02 20:29:40 ~ 2026-08-02 20:31:25 (1분 45초)
+
+- Worker `/health` 응답에 현재 요청 IP의 개발자 진단 허용 여부를 추가했다.
+- 페이지 하단 배포 정보 왼쪽에 `Developer: yes/no/old API/unavailable` 상태를 표시하도록 연결했다.
+- `old API` 상태로 Worker 미배포를, `no` 상태로 화이트리스트 불일치를, `unavailable` 상태로 API 연결 문제를 구분할 수 있게 했다.
+- 웹 검사·빌드와 API 테스트 15개를 통과했다.
+
+## Worker API 주소 오타 수정 2026-08-02 20:35:30 ~ 2026-08-02 20:37:00 (1분 30초)
+
+- 실제 Worker 주소가 `https://mapeditor-api.oc7.workers.dev`임을 확인했다.
+- `.dev.vars`와 생성된 Pages `app-config.json`의 잘못된 `oc7-workers.dev` 주소를 `oc7.workers.dev`로 수정했다.
+- 이 오타가 `Developer: unavailable`과 로그인 API 연결 실패의 직접 원인이었다.
+## Push changes 2026-08-02 20:40:43 ~ 2026-08-02 20:41:20 (0분 37초)
+
+- 정적 검사 성공 후 현재 변경 사항을 영어 커밋으로 만들고 원격 저장소에 푸시한다.
+## Private D1 diagnostic page 2026-08-02 20:44:18 ~ 2026-08-02 20:46:45 (2분 27초)
+
+- Added an unlisted static `/diag` page with Worker, developer access, D1, table, and migration checks.
+- Added developer-IP-only detailed D1 diagnostics through the Worker health endpoint without exposing schema details to regular visitors.
+- Passed web checks, API tests (16), build verification, and `git diff --check`.
+## Production deployment 2026-08-02 21:05:00 ~ 2026-08-02 21:09:08 (4분 08초)
+
+- Verified Wrangler authentication, applied local and remote D1 migrations with no pending migrations, and deployed `mapeditor-api` successfully.
+- Deployed the Pages production site successfully with the corrected Worker URL and `/diag` static page.
+- Live verification passed: Worker health, D1 detailed diagnostics, required tables, migration metadata, and Pages `/diag/` returned successfully.

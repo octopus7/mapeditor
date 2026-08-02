@@ -5,9 +5,12 @@ import {
 } from "./editor-model";
 import { getTransitionLayers, NEIGHBOR_MASK } from "./autotile";
 import {
-  AuthClient, isAvatarIcon, parsePublicAppConfig,
+  AuthApiError, AuthClient, isAvatarIcon, parsePublicAppConfig,
   type AuthSession, type AvatarIcon,
 } from "./auth-client";
+import { ImageLibraryClient, type ImageAsset } from "./image-library";
+import { MapStorageClient, resizeMap } from "./map-library";
+import { formatDeploymentTime, parseDeploymentMetadata } from "./deployment-meta";
 
 const CELL_SIZE = 36;
 const STORAGE_KEY = "mapeditor-draft-v1";
@@ -46,6 +49,7 @@ type MovingProp = {
 };
 
 let map = restoreDraft() ?? createInitialMap();
+let savedMapId: string | null = null;
 let selectedLayer: Layer = "ground";
 let selectedGround: GroundType = "grass";
 let selectedProp: PropType = "broadleaf-tree";
@@ -59,10 +63,13 @@ let history: MapDocument[] = [];
 let future: MapDocument[] = [];
 let saveTimer: number | undefined;
 let authClient: AuthClient | null = null;
+let imageLibraryClient: ImageLibraryClient | null = null;
+let mapStorageClient: MapStorageClient | null = null;
 let authSession: AuthSession | null = null;
 let googleClientId = "";
 let googleIdentityLoadPromise: Promise<void> | null = null;
 let fileMenuOpen = false;
+let saveAsMode = false;
 let fullscreenFallback = false;
 let pendingAvatarIcon: AvatarIcon = "initial";
 let zoom = 1;
@@ -100,6 +107,12 @@ document.querySelector<HTMLDivElement>("#app")!.innerHTML = `
             <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 7h16M4 12h16M4 17h16" /></svg>
           </button>
           <div class="file-menu hidden" id="file-menu" role="menu" aria-label="파일 기능">
+            <span class="file-menu-heading">지도 작업</span>
+            <button class="button export" id="save-map" role="menuitem">지도 저장</button>
+            <button class="button export" id="save-map-as" role="menuitem">다른 이름으로 저장</button>
+            <button class="button export" id="open-map-library" role="menuitem">저장한 지도 목록</button>
+            <button class="button export" id="open-image-library" role="menuitem">내 이미지</button>
+            <button class="button export" id="open-resize-map" role="menuitem">맵 크기 조정</button>
             <span class="file-menu-heading">파일 내보내기</span>
             <button class="button export" id="export-json" role="menuitem">JSON 저장</button>
             <button class="button primary" id="export-png" role="menuitem">PNG 내보내기</button>
@@ -166,7 +179,7 @@ document.querySelector<HTMLDivElement>("#app")!.innerHTML = `
         <div class="canvas-scroll"><div class="canvas-frame" id="canvas-frame">
           <canvas id="map-canvas" aria-label="28 곱하기 18 타일 지도" tabindex="0"></canvas>
         </div></div>
-        <div class="stage-footer"><span><b>28 × 18</b> 셀</span><span id="cursor-status">셀 위에 커서를 올려보세요</span><span class="footer-links">로컬 초안 · <button type="button" id="open-page-qr">page qr</button> · <a href="https://mapedit.pages.dev/cdn-cgi/trace" target="_blank" rel="noopener noreferrer">cdn trace</a> · <a href="https://github.com/octopus7/mapeditor" target="_blank" rel="noopener noreferrer">github</a></span></div>
+        <div class="stage-footer"><span><b id="map-size">28 × 18</b> 셀</span><span id="cursor-status">셀 위에 커서를 올려보세요</span><span class="footer-links"><span id="developer-access" class="developer-access">Developer: checking</span> · <span id="deployment-time" class="deployment-time">Deployment: checking</span> · 로컬 초안 · <button type="button" id="open-page-qr">page qr</button> · <a href="https://mapedit.pages.dev/cdn-cgi/trace" target="_blank" rel="noopener noreferrer">cdn trace</a> · <a href="https://github.com/octopus7/mapeditor" target="_blank" rel="noopener noreferrer">github</a></span></div>
       </section>
 
       <aside class="reference-panel" aria-label="레이아웃 참고 이미지">
@@ -204,13 +217,65 @@ document.querySelector<HTMLDivElement>("#app")!.innerHTML = `
       <div class="profile-actions"><button class="button ghost" value="cancel">닫기</button><button class="button danger" type="button" id="logout">로그아웃</button><button class="button primary" type="button" id="save-profile">설정 저장</button></div>
     </form>
   </dialog>
+  <dialog id="auth-debug-dialog" class="auth-debug-dialog" aria-labelledby="auth-debug-title">
+    <form method="dialog">
+      <h2 id="auth-debug-title">개발자 로그인 진단</h2>
+      <p id="auth-debug-message">허용된 개발자 접속에서만 표시되는 상세 오류입니다.</p>
+      <pre id="auth-debug-details"></pre>
+      <div class="dialog-actions"><button class="button primary">닫기</button></div>
+    </form>
+  </dialog>
+  <dialog id="map-save-dialog" class="editor-dialog">
+    <form method="dialog">
+      <h2 id="map-save-title">지도 저장</h2>
+      <p class="dialog-note">로그인한 사용자만 개인 지도 목록에 저장할 수 있습니다.</p>
+      <label for="map-save-name">지도 이름</label>
+      <input id="map-save-name" maxlength="80" autocomplete="off" />
+      <p class="dialog-message" id="map-save-message"></p>
+      <div class="dialog-actions"><button class="button ghost" value="cancel">취소</button><button class="button primary" type="button" id="confirm-map-save">저장</button></div>
+    </form>
+  </dialog>
+  <dialog id="map-library-dialog" class="editor-dialog map-library-dialog">
+    <form method="dialog">
+      <h2>저장한 지도 목록</h2>
+      <p class="dialog-note" id="map-library-message">로그인 후 저장한 지도를 불러올 수 있습니다.</p>
+      <div id="map-library-list" class="map-library-list"></div>
+      <div class="dialog-actions"><button class="button ghost" value="cancel">닫기</button></div>
+    </form>
+  </dialog>
+  <dialog id="image-library-dialog" class="editor-dialog image-library-dialog">
+    <form method="dialog">
+      <h2>내 이미지</h2>
+      <p class="dialog-note">로그인한 사용자만 이미지를 저장하고 목록을 볼 수 있습니다.</p>
+      <div class="image-upload-row"><input id="image-upload-input" type="file" accept="image/jpeg,image/png,image/webp,image/gif" /><button class="button primary" type="button" id="upload-image">이미지 저장</button></div>
+      <p class="dialog-message" id="image-library-message"></p>
+      <div id="image-library-list" class="image-library-list"></div>
+      <div class="dialog-actions"><button class="button ghost" value="cancel">닫기</button></div>
+    </form>
+  </dialog>
+  <dialog id="resize-map-dialog" class="editor-dialog">
+    <form method="dialog">
+      <h2>맵 크기 조정</h2>
+      <p class="dialog-note">새 크기를 입력하면 현재 셀을 기준 위치에 맞춰 보존합니다.</p>
+      <div class="resize-fields"><label for="resize-columns">가로<input id="resize-columns" type="number" min="8" max="200" /></label><label for="resize-rows">세로<input id="resize-rows" type="number" min="8" max="200" /></label></div>
+      <label for="resize-anchor">기준 위치</label>
+      <select id="resize-anchor"><option value="center">가운데</option><option value="top-left">왼쪽 위</option><option value="top">위쪽 가운데</option><option value="top-right">오른쪽 위</option><option value="left">왼쪽 가운데</option><option value="right">오른쪽 가운데</option><option value="bottom-left">왼쪽 아래</option><option value="bottom">아래쪽 가운데</option><option value="bottom-right">오른쪽 아래</option></select>
+      <p class="dialog-message" id="resize-map-message"></p>
+      <div class="dialog-actions"><button class="button ghost" value="cancel">취소</button><button class="button primary" type="button" id="confirm-resize-map">적용</button></div>
+    </form>
+  </dialog>
 `;
 
 const canvas = document.querySelector<HTMLCanvasElement>("#map-canvas")!;
 const canvasFrame = document.querySelector<HTMLDivElement>("#canvas-frame")!;
 const context = canvas.getContext("2d")!;
-canvas.width = map.columns * CELL_SIZE;
-canvas.height = map.rows * CELL_SIZE;
+function syncCanvasSize(): void {
+  canvas.width = map.columns * CELL_SIZE;
+  canvas.height = map.rows * CELL_SIZE;
+  document.querySelector("#map-size")!.textContent = `${map.columns} × ${map.rows}`;
+  canvas.setAttribute("aria-label", `${map.columns} 곱하기 ${map.rows} 타일 지도`);
+}
+syncCanvasSize();
 const propImages = new Map<PropType, HTMLImageElement>();
 for (const prop of propOptions) {
   const image = new Image();
@@ -425,14 +490,14 @@ function updateHistoryButtons(): void {
 function syncName(): void { (document.querySelector("#map-name") as HTMLInputElement).value = map.name; }
 function undo(): void {
   const previous = history.pop(); if (!previous) return;
-  future.push(cloneMap(map)); map = previous; syncName(); render(); scheduleSave();
+  future.push(cloneMap(map)); map = previous; syncCanvasSize(); syncName(); render(); scheduleSave();
 }
 function redo(): void {
   const next = future.pop(); if (!next) return;
-  history.push(cloneMap(map)); map = next; syncName(); render(); scheduleSave();
+  history.push(cloneMap(map)); map = next; syncCanvasSize(); syncName(); render(); scheduleSave();
 }
 function replaceMap(next: MapDocument): void {
-  history.push(cloneMap(map)); future = []; map = next; syncName(); render(); scheduleSave();
+  history.push(cloneMap(map)); future = []; map = next; syncCanvasSize(); syncName(); render(); scheduleSave();
 }
 function download(content: Blob, filename: string): void {
   const link = document.createElement("a"); link.href = URL.createObjectURL(content); link.download = filename; link.click(); URL.revokeObjectURL(link.href);
@@ -441,6 +506,211 @@ function setFileMenuOpen(open: boolean): void {
   fileMenuOpen = open;
   document.querySelector("#file-menu")!.classList.toggle("hidden", !open);
   document.querySelector("#file-menu-toggle")!.setAttribute("aria-expanded", String(open));
+}
+function setDialogMessage(selector: string, message: string, kind: "error" | "success" | "" = ""): void {
+  const element = document.querySelector<HTMLElement>(selector)!;
+  element.textContent = message;
+  element.classList.toggle("is-error", kind === "error");
+  element.classList.toggle("is-success", kind === "success");
+}
+function openMapSaveDialog(asNew = false): void {
+  setFileMenuOpen(false);
+  saveAsMode = asNew;
+  const dialog = document.querySelector<HTMLDialogElement>("#map-save-dialog")!;
+  const input = document.querySelector<HTMLInputElement>("#map-save-name")!;
+  const button = document.querySelector<HTMLButtonElement>("#confirm-map-save")!;
+  input.value = map.name;
+  document.querySelector("#map-save-title")!.textContent = asNew ? "다른 이름으로 저장" : "지도 저장";
+  button.disabled = !authSession || !mapStorageClient;
+  setDialogMessage("#map-save-message", authSession ? "" : "DB 저장은 로그인이 필요합니다.");
+  dialog.showModal();
+}
+async function saveMapToCloud(): Promise<void> {
+  const button = document.querySelector<HTMLButtonElement>("#confirm-map-save")!;
+  if (!authSession || !mapStorageClient) {
+    setDialogMessage("#map-save-message", "DB 저장은 로그인이 필요합니다.", "error");
+    return;
+  }
+  const name = document.querySelector<HTMLInputElement>("#map-save-name")!.value.trim();
+  if (!name) {
+    setDialogMessage("#map-save-message", "지도 이름을 입력해 주세요.", "error");
+    return;
+  }
+  button.disabled = true;
+  setDialogMessage("#map-save-message", "저장 중입니다.");
+  try {
+    const saved = saveAsMode || !savedMapId
+      ? await mapStorageClient.saveMap(authSession.token, map, name)
+      : await mapStorageClient.updateMap(authSession.token, savedMapId, map, name);
+    savedMapId = saved.id;
+    map.name = saved.name;
+    syncName();
+    scheduleSave();
+    setDialogMessage("#map-save-message", "개인 지도 목록에 저장했습니다.", "success");
+    window.setTimeout(() => document.querySelector<HTMLDialogElement>("#map-save-dialog")!.close(), 450);
+  } catch (error) {
+    setDialogMessage("#map-save-message", error instanceof Error ? error.message : "지도를 저장하지 못했습니다.", "error");
+  } finally {
+    button.disabled = false;
+  }
+}
+function renderMapLibrary(items: readonly { id: string; name: string; createdAt?: string; updatedAt?: string }[]): void {
+  const list = document.querySelector<HTMLDivElement>("#map-library-list")!;
+  list.replaceChildren();
+  if (items.length === 0) {
+    const empty = document.createElement("div");
+    empty.className = "empty-library";
+    empty.textContent = "저장한 지도가 없습니다.";
+    list.append(empty);
+    return;
+  }
+  for (const item of items) {
+    const row = document.createElement("div");
+    row.className = "map-library-item";
+    const detail = document.createElement("div");
+    const name = document.createElement("strong");
+    name.textContent = item.name;
+    const date = document.createElement("small");
+    date.textContent = item.updatedAt ?? item.createdAt ?? "";
+    detail.append(name, date);
+    const load = document.createElement("button");
+    load.type = "button";
+    load.className = "button export";
+    load.textContent = "불러오기";
+    load.addEventListener("click", () => { void loadSavedMap(item.id, load); });
+    row.append(detail, load);
+    list.append(row);
+  }
+}
+async function loadSavedMap(id: string, button: HTMLButtonElement): Promise<void> {
+  if (!authSession || !mapStorageClient) return;
+  button.disabled = true;
+  setDialogMessage("#map-library-message", "지도를 불러오는 중입니다.");
+  try {
+    const loaded = await mapStorageClient.loadMap(authSession.token, id);
+    savedMapId = id;
+    replaceMap(loaded);
+    document.querySelector<HTMLDialogElement>("#map-library-dialog")!.close();
+  } catch (error) {
+    setDialogMessage("#map-library-message", error instanceof Error ? error.message : "지도를 불러오지 못했습니다.", "error");
+  } finally {
+    button.disabled = false;
+  }
+}
+async function openMapLibrary(): Promise<void> {
+  setFileMenuOpen(false);
+  const dialog = document.querySelector<HTMLDialogElement>("#map-library-dialog")!;
+  const list = document.querySelector<HTMLDivElement>("#map-library-list")!;
+  list.replaceChildren();
+  if (!authSession || !mapStorageClient) {
+    setDialogMessage("#map-library-message", "DB 저장과 목록 조회는 로그인이 필요합니다.", "error");
+    dialog.showModal();
+    return;
+  }
+  setDialogMessage("#map-library-message", "저장한 지도를 불러오는 중입니다.");
+  dialog.showModal();
+  try {
+    const items = await mapStorageClient.listMaps(authSession.token);
+    setDialogMessage("#map-library-message", items.length ? "불러올 지도를 선택하세요." : "");
+    renderMapLibrary(items);
+  } catch (error) {
+    setDialogMessage("#map-library-message", error instanceof Error ? error.message : "지도 목록을 불러오지 못했습니다.", "error");
+  }
+}
+function renderImageLibrary(items: readonly ImageAsset[]): void {
+  const list = document.querySelector<HTMLDivElement>("#image-library-list")!;
+  list.replaceChildren();
+  if (items.length === 0) {
+    const empty = document.createElement("div");
+    empty.className = "empty-library";
+    empty.textContent = "저장한 이미지가 없습니다.";
+    list.append(empty);
+    return;
+  }
+  const grid = document.createElement("div");
+  grid.className = "image-library-grid";
+  for (const asset of items) {
+    const card = document.createElement("figure");
+    card.className = "image-library-card";
+    const image = document.createElement("img");
+    image.src = asset.thumbnailUrl;
+    image.alt = asset.originalFilename;
+    image.loading = "lazy";
+    image.referrerPolicy = "no-referrer";
+    const caption = document.createElement("figcaption");
+    const filename = document.createElement("strong");
+    filename.textContent = asset.originalFilename;
+    const metadata = document.createElement("small");
+    metadata.textContent = `${Math.ceil(asset.byteSize / 1024)} KB`;
+    caption.append(filename, metadata);
+    card.append(image, caption);
+    grid.append(card);
+  }
+  list.append(grid);
+}
+async function openImageLibrary(): Promise<void> {
+  setFileMenuOpen(false);
+  const dialog = document.querySelector<HTMLDialogElement>("#image-library-dialog")!;
+  document.querySelector<HTMLInputElement>("#image-upload-input")!.value = "";
+  document.querySelector<HTMLButtonElement>("#upload-image")!.disabled = !authSession || !imageLibraryClient;
+  if (!authSession || !imageLibraryClient) {
+    setDialogMessage("#image-library-message", "이미지 저장과 목록 조회는 로그인이 필요합니다.", "error");
+    dialog.showModal();
+    return;
+  }
+  setDialogMessage("#image-library-message", "저장한 이미지를 불러오는 중입니다.");
+  dialog.showModal();
+  try {
+    const result = await imageLibraryClient.listImages(authSession.token);
+    setDialogMessage("#image-library-message", result.images.length ? "저장한 이미지" : "");
+    renderImageLibrary(result.images);
+  } catch (error) {
+    setDialogMessage("#image-library-message", error instanceof Error ? error.message : "이미지 목록을 불러오지 못했습니다.", "error");
+  }
+}
+async function uploadSelectedImage(): Promise<void> {
+  const input = document.querySelector<HTMLInputElement>("#image-upload-input")!;
+  const button = document.querySelector<HTMLButtonElement>("#upload-image")!;
+  if (!authSession || !imageLibraryClient) {
+    setDialogMessage("#image-library-message", "이미지 저장은 로그인이 필요합니다.", "error");
+    return;
+  }
+  const file = input.files?.[0];
+  if (!file) {
+    setDialogMessage("#image-library-message", "첨부할 이미지를 선택해 주세요.", "error");
+    return;
+  }
+  button.disabled = true;
+  setDialogMessage("#image-library-message", "이미지를 저장하는 중입니다.");
+  try {
+    await imageLibraryClient.uploadImage(authSession.token, file);
+    const result = await imageLibraryClient.listImages(authSession.token);
+    renderImageLibrary(result.images);
+    input.value = "";
+    setDialogMessage("#image-library-message", "이미지를 저장했습니다.", "success");
+  } catch (error) {
+    setDialogMessage("#image-library-message", error instanceof Error ? error.message : "이미지를 저장하지 못했습니다.", "error");
+  } finally {
+    button.disabled = false;
+  }
+}
+function openResizeMapDialog(): void {
+  setFileMenuOpen(false);
+  (document.querySelector<HTMLInputElement>("#resize-columns")!).value = String(map.columns);
+  (document.querySelector<HTMLInputElement>("#resize-rows")!).value = String(map.rows);
+  setDialogMessage("#resize-map-message", "");
+  document.querySelector<HTMLDialogElement>("#resize-map-dialog")!.showModal();
+}
+function applyMapResize(): void {
+  const columns = Number(document.querySelector<HTMLInputElement>("#resize-columns")!.value);
+  const rows = Number(document.querySelector<HTMLInputElement>("#resize-rows")!.value);
+  const anchor = document.querySelector<HTMLSelectElement>("#resize-anchor")!.value as Parameters<typeof resizeMap>[3];
+  try {
+    replaceMap(resizeMap(map, columns, rows, anchor));
+    document.querySelector<HTMLDialogElement>("#resize-map-dialog")!.close();
+  } catch (error) {
+    setDialogMessage("#resize-map-message", error instanceof Error ? error.message : "맵 크기를 적용하지 못했습니다.", "error");
+  }
 }
 type WebkitDocument = Document & {
   webkitFullscreenElement?: Element | null;
@@ -515,6 +785,7 @@ function renderProfile(): void {
   const slot = document.querySelector<HTMLDivElement>("#auth-slot")!;
   slot.classList.remove("auth-ready");
   slot.classList.remove("auth-logged-out");
+  slot.classList.add("auth-visible");
   if (!authSession) return;
   const button = document.createElement("button");
   const avatar = document.createElement("span");
@@ -568,10 +839,22 @@ function renderAuthNote(message: string, title?: string): void {
   const slot = document.querySelector<HTMLDivElement>("#auth-slot")!;
   slot.classList.remove("auth-ready");
   slot.classList.remove("auth-logged-out");
+  slot.classList.add("auth-visible");
   slot.replaceChildren(note);
 }
 
-function renderAuthRetry(label: string, retry: () => void): void {
+function showAuthDebugDialog(error: unknown): void {
+  if (!(error instanceof AuthApiError) || !error.debug) return;
+  const dialog = document.querySelector<HTMLDialogElement>("#auth-debug-dialog");
+  const message = document.querySelector("#auth-debug-message");
+  const details = document.querySelector("#auth-debug-details");
+  if (!dialog || !message || !details) return;
+  message.textContent = `${error.status} ${error.code}: ${error.message}`;
+  details.textContent = JSON.stringify(error.debug, null, 2);
+  if (!dialog.open) dialog.showModal();
+}
+
+function renderAuthRetry(label: string, retry: () => void, error?: unknown): void {
   const button = document.createElement("button");
   button.type = "button";
   button.className = "auth-retry";
@@ -580,7 +863,9 @@ function renderAuthRetry(label: string, retry: () => void): void {
   const slot = document.querySelector<HTMLDivElement>("#auth-slot")!;
   slot.classList.remove("auth-ready");
   slot.classList.remove("auth-logged-out");
+  slot.classList.add("auth-visible");
   slot.replaceChildren(button);
+  showAuthDebugDialog(error);
 }
 
 async function loadGoogleIdentity(): Promise<void> {
@@ -617,17 +902,19 @@ async function handleGoogleCredential(response: GoogleCredentialResponse): Promi
     renderProfile();
   } catch (error) {
     console.error("Google login failed", error);
-    renderAuthRetry("로그인 실패 · 다시 시도", () => { void renderGoogleSignIn(); });
+    renderAuthRetry("로그인 실패 · 다시 시도", () => { void renderGoogleSignIn(); }, error);
   }
 }
 
 async function renderGoogleSignIn(): Promise<void> {
   const slot = document.querySelector<HTMLDivElement>("#auth-slot")!;
+  slot.classList.remove("auth-visible");
   if (!googleClientId) {
     renderAuthNote("로그인 설정 필요", "app-config.json에 Google OAuth 클라이언트 ID를 설정해야 합니다.");
     return;
   }
   renderAuthNote("Google 로그인 로딩…");
+  slot.classList.remove("auth-visible");
   try {
     await loadGoogleIdentity();
     if (!window.google) throw new Error("Google Identity API가 준비되지 않았습니다.");
@@ -642,6 +929,7 @@ async function renderGoogleSignIn(): Promise<void> {
       theme: "outline", size: "medium", shape: "rectangular", text: "signin_with", locale: "ko", width: 200,
     });
     slot.classList.add("auth-ready");
+    slot.classList.add("auth-visible");
   } catch (error) {
     console.error("Google Identity initialization failed", error);
     renderAuthRetry("로그인 다시 시도", () => { void renderGoogleSignIn(); });
@@ -659,7 +947,10 @@ async function initializeAuth(): Promise<void> {
       return;
     }
     authClient = new AuthClient(config.apiBaseUrl);
+    imageLibraryClient = new ImageLibraryClient(config.apiBaseUrl);
+    mapStorageClient = new MapStorageClient(config.apiBaseUrl);
     googleClientId = config.googleClientId;
+    void initializeDeveloperAccess(config.apiBaseUrl);
     const restored = restoreAuthSession();
     if (restored) {
       try {
@@ -675,6 +966,49 @@ async function initializeAuth(): Promise<void> {
   } catch (error) {
     console.error("Authentication setup failed", error);
     renderAuthRetry("로그인 서버 다시 연결", () => { void initializeAuth(); });
+  }
+}
+
+async function initializeDeploymentTime(): Promise<void> {
+  const target = document.querySelector<HTMLSpanElement>("#deployment-time");
+  if (!target) return;
+  try {
+    const response = await fetch("/deployment-meta.json", { cache: "no-store" });
+    if (!response.ok) throw new Error("deployment metadata unavailable");
+    const metadata = parseDeploymentMetadata(await response.json());
+    target.textContent = formatDeploymentTime(metadata.deployedAt);
+  } catch {
+    target.textContent = "배포 시각 확인 불가";
+  }
+}
+
+async function initializeDeveloperAccess(apiBaseUrl: string): Promise<void> {
+  const target = document.querySelector<HTMLSpanElement>("#developer-access");
+  if (!target) return;
+  try {
+    const response = await fetch(`${apiBaseUrl}/health`, {
+      cache: "no-store",
+      headers: { Accept: "application/json" },
+    });
+    if (!response.ok) throw new Error("health check failed");
+    const body = await response.json() as { developerDebug?: unknown };
+    target.classList.remove("is-on", "is-off", "is-old", "is-unavailable");
+    if (typeof body.developerDebug !== "boolean") {
+      target.textContent = "Developer: old API";
+      target.classList.add("is-old");
+      target.title = "The deployed Worker does not expose developer access status.";
+      return;
+    }
+    target.textContent = body.developerDebug ? "Developer: yes" : "Developer: no";
+    target.classList.add(body.developerDebug ? "is-on" : "is-off");
+    target.title = body.developerDebug
+      ? "This browser IP is allowlisted for developer diagnostics."
+      : "This browser IP is not allowlisted for developer diagnostics.";
+  } catch {
+    target.textContent = "Developer: unavailable";
+    target.classList.remove("is-on", "is-off", "is-old");
+    target.classList.add("is-unavailable");
+    target.title = "The Worker health check could not be completed.";
   }
 }
 
@@ -772,9 +1106,9 @@ document.querySelector("#toggle-pan")!.addEventListener("click", () => {
   panMode = !panMode;
   updateViewport();
 });
-document.querySelector("#reset-map")!.addEventListener("click", () => replaceMap(createInitialMap()));
+document.querySelector("#reset-map")!.addEventListener("click", () => { savedMapId = null; replaceMap(createInitialMap()); });
 document.querySelector("#clear-map")!.addEventListener("click", () => {
-  const next = createInitialMap(); next.name = "새로운 숲"; next.cells = next.cells.map(() => ({ ground: "grass", prop: null })); replaceMap(next);
+  const next = createInitialMap(); next.name = "새로운 숲"; next.cells = next.cells.map(() => ({ ground: "grass", prop: null })); savedMapId = null; replaceMap(next);
 });
 document.querySelector("#export-json")!.addEventListener("click", () => {
   setFileMenuOpen(false);
@@ -785,6 +1119,14 @@ document.querySelector("#export-png")!.addEventListener("click", () => {
   const wasVisible = gridVisible; gridVisible = false; render();
   canvas.toBlob((blob) => { if (blob) download(blob, "forest-map.png"); gridVisible = wasVisible; render(); }, "image/png");
 });
+document.querySelector("#save-map")!.addEventListener("click", () => openMapSaveDialog(false));
+document.querySelector("#save-map-as")!.addEventListener("click", () => openMapSaveDialog(true));
+document.querySelector("#open-map-library")!.addEventListener("click", () => { void openMapLibrary(); });
+document.querySelector("#open-image-library")!.addEventListener("click", () => { void openImageLibrary(); });
+document.querySelector("#open-resize-map")!.addEventListener("click", openResizeMapDialog);
+document.querySelector("#confirm-map-save")!.addEventListener("click", () => { void saveMapToCloud(); });
+document.querySelector("#upload-image")!.addEventListener("click", () => { void uploadSelectedImage(); });
+document.querySelector("#confirm-resize-map")!.addEventListener("click", applyMapResize);
 document.querySelector("#file-menu-toggle")!.addEventListener("click", (event) => {
   event.stopPropagation();
   setFileMenuOpen(!fileMenuOpen);
@@ -863,6 +1205,10 @@ document.querySelector("#logout")!.addEventListener("click", async () => {
     saveAuthSession(null);
     window.google?.accounts.id.disableAutoSelect();
     document.querySelector<HTMLDialogElement>("#profile-dialog")!.close();
+    for (const id of ["#map-save-dialog", "#map-library-dialog", "#image-library-dialog"]) {
+      const dialog = document.querySelector<HTMLDialogElement>(id);
+      if (dialog?.open) dialog.close();
+    }
     button.disabled = false;
     void renderGoogleSignIn();
   }
@@ -874,4 +1220,5 @@ setPropMode(propMode);
 updateFullscreenButton();
 updateViewport();
 render();
+void initializeDeploymentTime();
 void initializeAuth();

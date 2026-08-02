@@ -50,3 +50,10 @@
 - 질문 내용: Wrangler의 로컬 Cloudflare 인증 설정을 확인해 Pages 배포를 진행할까요?
 - 질문 이유: 일반 샌드박스 실행에서 Wrangler 로그 파일 권한과 비대화형 인증 제한으로 Pages 배포가 중단되어, 로컬 Wrangler OAuth 인증 설정에 접근할 권한이 필요했다.
 - 답변: 권한 요청이 승인되었고, Wrangler OAuth 인증으로 `mapedit` Pages 배포를 완료했다.
+
+## 이미지 연동 배포용 업로드 설정 입력
+
+- 질문 시각: 2026-08-02 18:40:20 KST
+- 질문 내용: 저장소 루트의 Git 제외 파일 `.dev.vars`에 `MEME_UPLOAD_TOKEN`을 입력하고, `apps/api/wrangler.jsonc`의 `MEME_UPLOAD_BASE_URL`과 `MEME_IMAGE_ORIGIN`을 실제 HTTPS origin으로 교체한 뒤 완료 여부를 알려줄 수 있는가?
+- 질문 이유: Worker가 이미지 업로드 토큰과 실제 meme 업로드·공개 이미지 주소 없이 배포되면 업로드 기능이 동작하지 않으며, 현재 meme 저장소에도 문서가 요구하는 `POST /v1/images` endpoint가 아직 없어 실제 연동 호출을 완료할 수 없기 때문이다. 실제 토큰 값은 기록하지 않는다.
+- 답변: 2026-08-02 19:30:25 KST에 사용자가 `.dev.vars`에 실제 값 없이 `MEME_UPLOAD_TOKEN=` 빈 항목을 추가해 달라고 요청했다. 2026-08-02 19:32:17 KST에 `MEME_UPLOAD_BASE_URL=https://meme-admin.devtuna.win`, `MEME_IMAGE_ORIGIN=https://meme.devtuna.win` 주소를 제공했고, 2026-08-02 19:34:33 KST에 실제 토큰 입력을 완료했다. 토큰 값은 기록하지 않았다.

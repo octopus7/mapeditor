@@ -1,0 +1,45 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="robots" content="noindex, nofollow, noarchive" />
+    <meta name="theme-color" content="#172219" />
+    <link rel="icon" href="/favicon.svg" type="image/svg+xml" />
+    <link rel="stylesheet" href="./diag.css" />
+    <title>Worker Diagnostics</title>
+  </head>
+  <body>
+    <main class="diag-shell">
+      <header class="diag-header">
+        <div>
+          <p class="eyebrow">PRIVATE DIAGNOSTIC</p>
+          <h1>Worker / D1 diagnostics</h1>
+          <p class="intro">Checks the deployed API, developer access, D1 connectivity, and required tables.</p>
+        </div>
+        <button class="run-button" id="run-diagnostics" type="button">Run again</button>
+      </header>
+
+      <section class="summary pending" id="summary" aria-live="polite">
+        <span class="summary-dot"></span>
+        <div>
+          <strong id="summary-title">Waiting for diagnostics</strong>
+          <span id="summary-detail">The first check will start automatically.</span>
+        </div>
+      </section>
+
+      <section class="check-list" id="checks" aria-label="Diagnostic results"></section>
+
+      <details class="raw-details">
+        <summary>Raw response</summary>
+        <pre id="raw-response">No response yet.</pre>
+      </details>
+
+      <footer>
+        <span id="checked-at">Not checked</span>
+        <span>This page is intentionally unlisted.</span>
+      </footer>
+    </main>
+    <script type="module" src="./diag.js"></script>
+  </body>
+</html>

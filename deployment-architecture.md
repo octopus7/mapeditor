@@ -58,6 +58,7 @@ npx wrangler pages deploy .\apps\web\dist --project-name mapedit --branch main
 
 - Worker 이름은 `mapeditor-api`를 사용한다.
 - 로그인 토큰과 요청 origin을 서버에서 검증하고 허용된 Pages origin에만 CORS 응답을 제공한다.
+- `DEVELOPER_DEBUG_IPS`에는 운영 장애를 확인할 개발자 공인 IP만 쉼표로 등록한다. 이 목록에 포함된 요청에만 로그인 실패의 요청 ID와 내부 원인 요약을 응답하며, 일반 요청에는 상세 원인을 포함하지 않는다.
 - D1 바인딩을 통해 사용자와 프로필 데이터를 읽고 쓴다.
 - 세션 서명 키, 최초 커스텀 토큰 등 민감한 값은 Worker Secrets로 배포한다.
 - Google OAuth Client ID는 토큰 audience 검증에 사용하지만 공개 식별자이므로 평문 환경 설정으로 관리해도 된다.
@@ -96,7 +97,13 @@ Worker 배포 주소가 확정되면 Pages의 API 기본 주소와 Worker의 COR
 
 ```powershell
 .\scripts\Deploy-Worker.ps1
-.\scripts\Deploy-Pages.ps1 -ApiBaseUrl '<DEPLOYED_WORKER_ORIGIN>'
+.\scripts\Deploy-Pages.ps1
+```
+
+두 리소스를 순서대로 한 번에 배포하려면 다음 통합 스크립트를 사용한다. Pages API 주소는 `.dev.vars`의 `MAPEDITOR_API_BASE_URL`에서 읽으며, 필요한 경우 `-ApiBaseUrl`로 일회성 덮어쓰기가 가능하다.
+
+```powershell
+.\scripts\Deploy-Production.ps1
 ```
 
 Worker 스크립트는 로컬·원격 D1 마이그레이션, 필요한 Worker Secrets 등록과 Worker 배포를 처리한다. Pages 스크립트는 빌드 후 Git에서 제외된 `.dev.vars`의 공개 Google Client ID와 전달받은 Worker 주소를 배포 산출물의 `app-config.json`에 주입한다.

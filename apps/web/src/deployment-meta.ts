@@ -1,0 +1,36 @@
+export interface DeploymentMetadata {
+  deployedAt: string | null;
+}
+
+export function parseDeploymentMetadata(value: unknown): DeploymentMetadata {
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    return { deployedAt: null };
+  }
+  const deployedAt = (value as Record<string, unknown>).deployedAt;
+  return { deployedAt: typeof deployedAt === "string" ? deployedAt : null };
+}
+
+export function formatDeploymentTime(
+  value: unknown,
+  locale?: string,
+  timeZone?: string,
+): string {
+  if (typeof value !== "string") return "배포 시각 확인 불가";
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return "배포 시각 확인 불가";
+  try {
+    const formatted = new Intl.DateTimeFormat(locale, {
+      year: "numeric",
+      month: "2-digit",
+      day: "2-digit",
+      hour: "2-digit",
+      minute: "2-digit",
+      second: "2-digit",
+      timeZoneName: "short",
+      ...(timeZone ? { timeZone } : {}),
+    }).format(date);
+    return `배포 ${formatted}`;
+  } catch {
+    return "배포 시각 확인 불가";
+  }
+}
