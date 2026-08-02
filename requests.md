@@ -323,3 +323,10 @@
 - Changed auth persistence to `localStorage` with one-time compatibility for the previous tab-scoped session.
 - Passed web checks, API tests (16), build verification, and live production bundle checks.
 - Redeployed Worker and Pages successfully; Worker health and D1 storage remain healthy.
+
+## Developer-only image upload failure diagnostics 2026-08-02 21:17:30 ~ 2026-08-02 21:21:37 (4분 07초)
+
+- Added allowlisted-developer diagnostics for image upload failures, including the upstream HTTP status, status text, and bounded redacted response body; regular users continue to receive only the generic error.
+- Added client parsing and an image-specific developer diagnostic dialog, plus API and web tests for diagnostic visibility and secret redaction.
+- Passed `npm run check`, deployed the Worker and Pages successfully, and verified the production health response and latest Pages JavaScript bundle.
+- The first deployment attempt stopped at remote D1 authentication in the restricted environment; the authorized Wrangler retry completed the remote checks and deployment.

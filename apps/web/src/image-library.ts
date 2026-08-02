@@ -408,9 +408,9 @@ function parseImageDebugDetails(value: unknown): ImageDebugDetails | undefined {
 }
 
 function boundedDebugString(value: unknown, maxLength: number): string | undefined {
-  if (typeof value !== "string" || hasControlCharacter(value)) return undefined;
-  const normalized = value.trim();
-  return normalized && normalized.length <= maxLength ? normalized : undefined;
+  if (typeof value !== "string") return undefined;
+  const normalized = value.replace(/[\u0000-\u001f\u007f]/g, " ").trim();
+  return normalized ? normalized.slice(0, maxLength) : undefined;
 }
 
 function boundedDebugNumber(value: unknown): number | undefined {

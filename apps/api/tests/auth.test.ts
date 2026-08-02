@@ -496,6 +496,72 @@ describe("user-owned map and image APIs", () => {
     expect(await singleResponse.json()).toEqual({ map: updated.map });
   });
 
+  it("returns upstream image failure details only to allowlisted developers", async () => {
+    const { env, handler } = createTestApi();
+    const session = await login(handler, env);
+    const upstream = vi.spyOn(globalThis, "fetch").mockImplementation(async () => Response.json({
+      code: "INVALID_IMAGE",
+      message: "The image decoder rejected the file.",
+      token: env.MEME_UPLOAD_TOKEN,
+    }, { status: 422, statusText: "Unprocessable Entity" }));
+
+    const makeUploadRequest = (ip: string) => new Request("https://api.example.com/images", {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${session.token}`,
+        "Content-Type": "image/png",
+        "Content-Length": "3",
+        "Idempotency-Key": `failed-upload-${ip}`,
+        "X-Original-Filename": "map.png",
+        "CF-Connecting-IP": ip,
+      },
+      body: Uint8Array.from([1, 2, 3]),
+    });
+
+    try {
+      const developerResponse = await handler.fetch!(
+        makeUploadRequest("14.35.239.105") as Parameters<NonNullable<typeof handler.fetch>>[0],
+        env as Env,
+        {} as ExecutionContext,
+      );
+      expect(developerResponse.status).toBe(502);
+      const developerBody = await developerResponse.json() as {
+        error: {
+          code: string;
+          message: string;
+          debug?: {
+            status: number;
+            upstreamStatus?: number;
+            upstreamStatusText?: string;
+            upstreamBody?: string;
+          };
+        };
+      };
+      expect(developerBody.error).toMatchObject({
+        code: "IMAGE_SERVICE_UNAVAILABLE",
+        message: "The image service could not accept the image.",
+        debug: {
+          status: 502,
+          upstreamStatus: 422,
+          upstreamStatusText: "Unprocessable Entity",
+          upstreamBody: expect.stringContaining("The image decoder rejected the file."),
+        },
+      });
+      expect(developerBody.error.debug?.upstreamBody).not.toContain(env.MEME_UPLOAD_TOKEN);
+
+      const regularResponse = await handler.fetch!(
+        makeUploadRequest("192.0.2.1") as Parameters<NonNullable<typeof handler.fetch>>[0],
+        env as Env,
+        {} as ExecutionContext,
+      );
+      expect(regularResponse.status).toBe(502);
+      const regularBody = await regularResponse.json() as { error: { debug?: unknown } };
+      expect(regularBody.error.debug).toBeUndefined();
+    } finally {
+      upstream.mockRestore();
+    }
+  });
+
   it("streams an image upload to the meme service and lists its own metadata", async () => {
     const { env, handler } = createTestApi();
     const session = await login(handler, env);

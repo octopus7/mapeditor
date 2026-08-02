@@ -939,18 +939,18 @@ async function handleImageUpload(
     throw new ApiError(502, "IMAGE_SERVICE_UNAVAILABLE", "The image service could not be reached.", error);
   }
   if (!upstream.ok) {
-    if (upstream.status === 413) throw new ApiError(413, "IMAGE_TOO_LARGE", "The image is too large.");
-    if (upstream.status === 429) throw new ApiError(429, "IMAGE_SERVICE_RATE_LIMITED", "The image service is busy.");
-    throw new ApiError(
-      502,
-      "IMAGE_SERVICE_UNAVAILABLE",
-      "The image service could not accept the image.",
-      new ImageServiceResponseError(
-        upstream.status,
-        upstream.statusText || "Unknown status",
-        await readUpstreamErrorBody(upstream),
-      ),
+    const upstreamError = new ImageServiceResponseError(
+      upstream.status,
+      upstream.statusText || "Unknown status",
+      await readUpstreamErrorBody(upstream),
     );
+    if (upstream.status === 413) {
+      throw new ApiError(413, "IMAGE_TOO_LARGE", "The image is too large.", upstreamError);
+    }
+    if (upstream.status === 429) {
+      throw new ApiError(429, "IMAGE_SERVICE_RATE_LIMITED", "The image service is busy.", upstreamError);
+    }
+    throw new ApiError(502, "IMAGE_SERVICE_UNAVAILABLE", "The image service could not accept the image.", upstreamError);
   }
 
   let metadata: ValidatedMemeImage;

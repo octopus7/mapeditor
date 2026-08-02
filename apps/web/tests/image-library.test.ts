@@ -144,6 +144,38 @@ describe("ImageLibraryClient", () => {
     }));
   });
 
+  it("preserves developer diagnostics from image API errors", async () => {
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue(jsonResponse({
+      error: {
+        code: "IMAGE_SERVICE_UNAVAILABLE",
+        message: "The image service could not accept the image.",
+        debug: {
+          requestId: "ray-123",
+          method: "POST",
+          path: "/images",
+          status: 502,
+          upstreamStatus: 422,
+          upstreamStatusText: "Unprocessable Entity",
+          upstreamBody: "The image decoder rejected the file.",
+        },
+      },
+    }, 502)));
+
+    const request = new ImageLibraryClient("https://api.example.com").listImages("session-token");
+    await expect(request).rejects.toMatchObject({
+      code: "IMAGE_SERVICE_UNAVAILABLE",
+      debug: {
+        requestId: "ray-123",
+        method: "POST",
+        path: "/images",
+        status: 502,
+        upstreamStatus: 422,
+        upstreamStatusText: "Unprocessable Entity",
+        upstreamBody: "The image decoder rejected the file.",
+      },
+    });
+  });
+
   it("requires a login token for both list and upload", async () => {
     const fetchMock = vi.fn();
     vi.stubGlobal("fetch", fetchMock);
