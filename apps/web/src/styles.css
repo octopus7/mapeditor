@@ -169,6 +169,7 @@ button:focus-visible, input:focus-visible, canvas:focus-visible { outline: 3px s
 .footer-links a:hover, .footer-links a:focus-visible, .footer-links button:hover, .footer-links button:focus-visible { opacity: .78; text-decoration: underline; }
 .status-dot { display: flex; align-items: center; gap: 7px; }.status-dot i { width: 6px; height: 6px; border-radius: 50%; background: #5d875c; box-shadow: 0 0 0 3px rgba(93, 135, 92, .12); }
 .deployment-time, .developer-access { color: #6f7b73; white-space: nowrap; }
+.deployment-time { cursor: help; text-decoration: underline dotted; text-underline-offset: 2px; }
 .developer-access { padding: 0; border: 0; background: none; font: inherit; }
 .developer-access.is-on { color: #47734d; font-weight: 700; }
 .developer-access.is-link { cursor: pointer; opacity: .78; text-decoration: underline; }

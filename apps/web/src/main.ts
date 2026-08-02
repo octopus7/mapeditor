@@ -23,7 +23,7 @@ import {
 } from "./auth-client";
 import { ImageLibraryClient, ImageLibraryError, type ImageAsset } from "./image-library";
 import { getResizeOffsets, MAX_MAP_SIZE, MIN_MAP_SIZE, MapStorageClient, resizeMap, type ResizeAnchor } from "./map-library";
-import { formatDeploymentTime, parseDeploymentMetadata } from "./deployment-meta";
+import { formatDeploymentRelativeTime, formatDeploymentTime, parseDeploymentMetadata } from "./deployment-meta";
 
 const CELL_SIZE = 36;
 const MAX_BRUSH_SIZE = 10;
@@ -140,6 +140,7 @@ let lastPaintedCell = "";
 let history: MapDocument[] = [];
 let future: MapDocument[] = [];
 let saveTimer: number | undefined;
+let deploymentTimeTimer: number | undefined;
 let authClient: AuthClient | null = null;
 let adminClient: AdminClient | null = null;
 let imageLibraryClient: ImageLibraryClient | null = null;
@@ -3089,9 +3090,19 @@ async function initializeDeploymentTime(): Promise<void> {
     const response = await fetch("/deployment-meta.json", { cache: "no-store" });
     if (!response.ok) throw new Error("deployment metadata unavailable");
     const metadata = parseDeploymentMetadata(await response.json());
-    target.textContent = formatDeploymentTime(metadata.deployedAt);
+    const fullTime = formatDeploymentTime(metadata.deployedAt);
+    target.title = fullTime;
+    target.setAttribute("aria-label", fullTime);
+    const updateRelativeTime = () => {
+      target.textContent = formatDeploymentRelativeTime(metadata.deployedAt);
+    };
+    updateRelativeTime();
+    if (deploymentTimeTimer !== undefined) window.clearInterval(deploymentTimeTimer);
+    deploymentTimeTimer = window.setInterval(updateRelativeTime, 60_000);
   } catch {
     target.textContent = "배포 시각 확인 불가";
+    target.removeAttribute("title");
+    target.removeAttribute("aria-label");
   }
 }
 

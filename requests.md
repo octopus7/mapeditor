@@ -591,3 +591,9 @@
 - 캐시된 명도 보정과 부분 갱신, 어두운 채도 보정 스와치, README 정리 변경분을 `mapedit` Cloudflare Pages에 배포했다.
 - 배포 URL은 `https://a731fda3.mapedit.pages.dev`이며 canonical 주소 `https://mapedit.pages.dev/`가 HTTP 200을 반환하는 것을 확인했다.
 - Worker, D1, 마이그레이션은 변경하거나 배포하지 않았다.
+
+## Add relative deployment time tooltip 2026-08-03 01:35:40 ~ 2026-08-03 01:38:37 (2분 57초)
+
+- 페이지 하단 배포 시각을 `방금 전`, `n분 전`, `n시간 전`, `n일 전` 형식의 상대 시간으로 표시하도록 변경했다.
+- 배포 시각에 마우스를 올리면 브라우저의 locale·timezone을 사용한 기존 전체 날짜·시간 형식이 툴팁으로 표시되며, 열린 페이지에서도 1분마다 상대 시간이 갱신된다.
+- 타입검사, 54개 테스트, Vite 프로덕션 빌드와 `git diff --check`를 통과한 뒤 Pages를 배포했다. Pages `https://2880a8b7.mapedit.pages.dev`, canonical 주소와 캐시 우회 메타데이터 응답은 HTTP 200이다. Worker와 D1은 변경하지 않았다.

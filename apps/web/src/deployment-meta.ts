@@ -34,3 +34,16 @@ export function formatDeploymentTime(
     return "배포 시각 확인 불가";
   }
 }
+
+export function formatDeploymentRelativeTime(value: unknown, now = new Date()): string {
+  if (typeof value !== "string") return "배포 시각 확인 불가";
+  const deployedAt = new Date(value);
+  if (Number.isNaN(deployedAt.getTime())) return "배포 시각 확인 불가";
+  const elapsedMinutes = Math.max(0, Math.floor((now.getTime() - deployedAt.getTime()) / 60_000));
+  if (elapsedMinutes < 1) return "방금 전";
+  if (elapsedMinutes < 60) return `${elapsedMinutes}분 전`;
+  const elapsedHours = Math.floor(elapsedMinutes / 60);
+  if (elapsedHours < 24) return `${elapsedHours}시간 전`;
+  const elapsedDays = Math.floor(elapsedHours / 24);
+  return `${elapsedDays}일 전`;
+}
