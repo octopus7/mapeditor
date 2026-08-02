@@ -794,17 +794,34 @@ function drawRaisedTileFace(column: number, row: number, ground: GroundType, ele
   gradient.addColorStop(1, dark);
   context.save();
   context.fillStyle = gradient;
-  context.fillRect(faceX, faceY, direction === "S" ? CELL_SIZE : faceDepth, direction === "S" ? faceDepth : CELL_SIZE);
+  const jaggedBottom: Array<[number, number]> = [];
+  if (direction === "S") {
+    const boundarySegments = 8;
+    for (let segment = 0; segment <= boundarySegments; segment += 1) {
+      const segmentX = faceX + (CELL_SIZE * segment) / boundarySegments;
+      const noise = colorNoise(column * 5 + segment, row * 7 + elevation * 3);
+      const uneven = Math.max(-3.5, Math.min(4.5, noise * .72 + (segment % 3 === 0 ? .7 : -.25)));
+      jaggedBottom.push([segmentX, faceY + faceDepth - 1 + uneven]);
+    }
+    context.beginPath();
+    context.moveTo(faceX, faceY);
+    context.lineTo(faceX + CELL_SIZE, faceY);
+    for (let point = jaggedBottom.length - 1; point >= 0; point -= 1) {
+      context.lineTo(jaggedBottom[point][0], jaggedBottom[point][1]);
+    }
+    context.closePath();
+    context.fill();
+  } else {
+    context.fillRect(faceX, faceY, faceDepth, CELL_SIZE);
+  }
   context.globalAlpha = .58;
   context.strokeStyle = dark;
   context.lineWidth = 1;
   if (direction === "S") {
     context.beginPath();
-    context.moveTo(x, faceY + faceDepth - 1);
-    for (let segment = 1; segment <= 6; segment += 1) {
-      const segmentX = x + (CELL_SIZE * segment) / 6;
-      const uneven = colorNoise(column + segment, row + elevation) * .45;
-      context.lineTo(segmentX, faceY + faceDepth - 1 + uneven);
+    context.moveTo(jaggedBottom[0][0], jaggedBottom[0][1]);
+    for (let point = 1; point < jaggedBottom.length; point += 1) {
+      context.lineTo(jaggedBottom[point][0], jaggedBottom[point][1]);
     }
     context.stroke();
     context.strokeStyle = highlight;
@@ -818,10 +835,12 @@ function drawRaisedTileFace(column: number, row: number, ground: GroundType, ele
     for (let ridge = 1; ridge <= ridgeCount; ridge += 1) {
       const ridgeX = x + (CELL_SIZE * ridge) / (ridgeCount + 1);
       const wobble = colorNoise(column + ridge, row - ridge) * .8;
+      const ridgeBottom = faceY + faceDepth - 1 + Math.max(-3.5, Math.min(4.5,
+        colorNoise(column * 5 + ridge, row * 7 + elevation * 3) * .72));
       context.beginPath();
       context.moveTo(ridgeX + wobble, faceY + 2);
       for (let segment = 1; segment <= 5; segment += 1) {
-        const segmentY = faceY + (faceDepth * segment) / 5;
+        const segmentY = segment === 5 ? ridgeBottom : faceY + (faceDepth * segment) / 5;
         const offset = colorNoise(column + ridge + segment, row + ridge) * .75;
         context.lineTo(ridgeX + offset, segmentY);
       }

@@ -565,3 +565,9 @@
 - 정적 검사에서 타입검사 2종, 53개 테스트, Vite 프로덕션 빌드가 모두 성공했다.
 - 배포 URL은 `https://33edc1ef.mapedit.pages.dev`이며 canonical 주소 `https://mapedit.pages.dev/`가 HTTP 200을 반환하는 것을 확인했다.
 - Worker, D1, 마이그레이션은 변경하거나 배포하지 않았다.
+
+## Make cliff contact edge vertically jagged 2026-08-03 01:23:00 ~ 2026-08-03 01:24:30 (1분 30초)
+
+- 절벽 남쪽 면의 가로 물결 무늬를 제거하고 세로로 흔들리는 능선과 면 분할 질감을 적용했다.
+- 지면에 닿는 하단 경계를 직선으로 그리지 않고 불규칙한 다각형 프로필로 채워 박스형 실루엣을 줄였으며, 세로 능선이 해당 경계까지 이어지도록 조정했다.
+- 타입검사, 53개 테스트, Vite 프로덕션 빌드와 운영 health/Pages 응답을 통과한 뒤 Worker와 Pages를 배포했다. Worker `a1d36971-b915-479c-8dc8-3eabff883ac5`, Pages `https://08b0a7c4.mapedit.pages.dev`.
