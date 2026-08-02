@@ -446,3 +446,9 @@
 - Removed the right-side AI reference image, enlargement action, and layout notes while keeping the reference-panel area for contextual editing.
 - Moved image transform controls into the right detail panel, showing the selected image preview, numeric rotation and scale inputs, current values, and a `기본값 복원` action for 0° and 200%.
 - Added empty and pre-placement states, synchronized the panel when selecting, placing, moving, or changing layers, passed all static checks with 44 tests, deployed Worker version `0f409b2d-0559-444e-b7c8-167c742b2cdf` and Pages preview `https://03640397.mapedit.pages.dev`, then verified the production bundle.
+
+## Change water bank faces to dark soil 2026-08-02 22:20:09 ~ 2026-08-02 22:32:08 (11분 59초)
+
+- Replaced the bright green/stone-like water bank gradient with dark brown soil palettes, especially for grass edges.
+- Increased the bank face thickness to cover the full water transition edge and retained a subtle darker outer edge.
+- Passed all static checks with 44 tests, deployed Pages, and verified the live map canvas.

@@ -422,13 +422,19 @@ function drawGroundTexture(column: number, row: number, ground: GroundType): voi
   context.restore();
 }
 type WaterBankDirection = "N" | "E" | "S" | "W";
+const waterBankPalettes: Record<GroundType, [number, number, number]> = {
+  grass: [91, 62, 36],
+  dirt: [111, 72, 40],
+  stone: [78, 78, 69],
+  water: [35, 84, 91],
+};
 function drawWaterBankFace(column: number, row: number, ground: GroundType, direction: WaterBankDirection): void {
   const x = column * CELL_SIZE;
   const y = row * CELL_SIZE;
-  const thickness = CELL_SIZE * .2;
-  const [r, g, b] = groundPalettes[ground];
-  const light = `rgb(${Math.min(255, r + 28)}, ${Math.min(255, g + 28)}, ${Math.min(255, b + 22)})`;
-  const dark = `rgb(${Math.round(r * .48)}, ${Math.round(g * .48)}, ${Math.round(b * .48)})`;
+  const thickness = CELL_SIZE * .25;
+  const [r, g, b] = waterBankPalettes[ground];
+  const soil = `rgb(${r}, ${g}, ${b})`;
+  const dark = `rgb(${Math.round(r * .58)}, ${Math.round(g * .58)}, ${Math.round(b * .58)})`;
   let faceX = x;
   let faceY = y;
   let faceWidth = CELL_SIZE;
@@ -450,8 +456,8 @@ function drawWaterBankFace(column: number, row: number, ground: GroundType, dire
     faceHeight = CELL_SIZE;
     gradient = context.createLinearGradient(x, 0, x + thickness, 0);
   }
-  gradient.addColorStop(0, light);
-  gradient.addColorStop(.58, `rgb(${r}, ${g}, ${b})`);
+  gradient.addColorStop(0, soil);
+  gradient.addColorStop(.78, soil);
   gradient.addColorStop(1, dark);
   context.save();
   context.fillStyle = gradient;
