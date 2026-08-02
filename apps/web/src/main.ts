@@ -4,7 +4,7 @@ import {
   moveProp, paintGround, placeImage, placeProp, removeImage, serializeMap, updateImageTransform,
   type GroundType, type MapDocument, type MapImagePlacement, type PropType,
 } from "./editor-model";
-import { getBridgeConnectionShape, getBridgeTextureRotation, getPropNeighborMask, getTransitionLayers, NEIGHBOR_MASK } from "./autotile";
+import { getBridgeConnectionShape, getBridgeTextureRotation, getPropNeighborMask, getTransitionLayers, getWaterBankMask, NEIGHBOR_MASK } from "./autotile";
 import {
   AuthApiError, AuthClient, isAvatarIcon, parsePublicAppConfig,
   type AuthSession, type AvatarIcon,
@@ -399,14 +399,14 @@ function escapeHtml(value: string): string {
 function colorNoise(column: number, row: number): number {
   return ((column * 31 + row * 17 + 26) % 11) - 5;
 }
+const groundPalettes: Record<GroundType, [number, number, number]> = {
+  grass: [104, 151, 85], dirt: [162, 126, 79], stone: [127, 132, 121], water: [58, 137, 153],
+};
 function drawGroundTexture(column: number, row: number, ground: GroundType): void {
   const x = column * CELL_SIZE;
   const y = row * CELL_SIZE;
   const noise = colorNoise(column, row);
-  const palettes: Record<GroundType, [number, number, number]> = {
-    grass: [104, 151, 85], dirt: [162, 126, 79], stone: [127, 132, 121], water: [58, 137, 153],
-  };
-  const [r, g, b] = palettes[ground];
+  const [r, g, b] = groundPalettes[ground];
   context.fillStyle = `rgb(${r + noise}, ${g + noise}, ${b + noise})`;
   context.fillRect(x, y, CELL_SIZE, CELL_SIZE);
   context.save(); context.globalAlpha = 0.22;
@@ -423,6 +423,63 @@ function drawGroundTexture(column: number, row: number, ground: GroundType): voi
     context.beginPath(); context.arc(x + 26, y + 25, ground === "stone" ? 3 : 1.2, 0, Math.PI * 2); context.fill();
   }
   context.restore();
+}
+type WaterBankDirection = "N" | "E" | "S" | "W";
+function drawWaterBankFace(column: number, row: number, ground: GroundType, direction: WaterBankDirection): void {
+  const x = column * CELL_SIZE;
+  const y = row * CELL_SIZE;
+  const thickness = CELL_SIZE * .2;
+  const [r, g, b] = groundPalettes[ground];
+  const light = `rgb(${Math.min(255, r + 28)}, ${Math.min(255, g + 28)}, ${Math.min(255, b + 22)})`;
+  const dark = `rgb(${Math.round(r * .48)}, ${Math.round(g * .48)}, ${Math.round(b * .48)})`;
+  let faceX = x;
+  let faceY = y;
+  let faceWidth = CELL_SIZE;
+  let faceHeight = thickness;
+  let gradient: CanvasGradient;
+  if (direction === "N") {
+    gradient = context.createLinearGradient(0, y + thickness, 0, y);
+  } else if (direction === "E") {
+    faceX = x + CELL_SIZE - thickness;
+    faceWidth = thickness;
+    faceHeight = CELL_SIZE;
+    gradient = context.createLinearGradient(x + CELL_SIZE - thickness, 0, x + CELL_SIZE, 0);
+  } else if (direction === "S") {
+    faceY = y + CELL_SIZE - thickness;
+    faceHeight = thickness;
+    gradient = context.createLinearGradient(0, y + CELL_SIZE - thickness, 0, y + CELL_SIZE);
+  } else {
+    faceWidth = thickness;
+    faceHeight = CELL_SIZE;
+    gradient = context.createLinearGradient(x, 0, x + thickness, 0);
+  }
+  gradient.addColorStop(0, light);
+  gradient.addColorStop(.58, `rgb(${r}, ${g}, ${b})`);
+  gradient.addColorStop(1, dark);
+  context.save();
+  context.fillStyle = gradient;
+  context.fillRect(faceX, faceY, faceWidth, faceHeight);
+  context.globalAlpha = .56;
+  context.strokeStyle = dark;
+  context.lineWidth = 1;
+  context.beginPath();
+  if (direction === "N" || direction === "S") {
+    const lineY = direction === "N" ? y + 1 : y + CELL_SIZE - 1;
+    context.moveTo(x, lineY); context.lineTo(x + CELL_SIZE, lineY);
+  } else {
+    const lineX = direction === "W" ? x + 1 : x + CELL_SIZE - 1;
+    context.moveTo(lineX, y); context.lineTo(lineX, y + CELL_SIZE);
+  }
+  context.stroke();
+  context.restore();
+}
+function drawWaterBank(column: number, row: number, ground: GroundType, mask: number): void {
+  const faces: Array<[number, WaterBankDirection]> = [
+    [NEIGHBOR_MASK.N, "N"], [NEIGHBOR_MASK.E, "E"], [NEIGHBOR_MASK.S, "S"], [NEIGHBOR_MASK.W, "W"],
+  ];
+  for (const [bit, direction] of faces) {
+    if (mask & bit) drawWaterBankFace(column, row, ground, direction);
+  }
 }
 function createTransitionPath(column: number, row: number, mask: number): Path2D {
   const x = column * CELL_SIZE;
@@ -448,6 +505,8 @@ function drawGround(column: number, row: number, ground: GroundType): void {
     drawGroundTexture(column, row, layer.ground);
     context.restore();
   }
+  const waterBankMask = getWaterBankMask(map, column, row);
+  if (waterBankMask) drawWaterBank(column, row, ground, waterBankMask);
 }
 const propScale: Record<PropType, number> = {
   "broadleaf-tree": 2.15, "pine-tree": 2.05, shrub: 1.25, boulder: 1.35, "fallen-log": 1.65, footbridge: 1.65,
@@ -890,18 +949,22 @@ function renderImageLibrary(items: readonly ImageAsset[]): void {
     card.setAttribute("role", "radio");
     card.setAttribute("aria-checked", "false");
     card.tabIndex = 0;
-    const preview = document.createElement("a");
+    const preview = document.createElement("button");
+    preview.type = "button";
     preview.className = "image-library-preview";
-    preview.href = asset.originalUrl;
-    preview.target = "_blank";
-    preview.rel = "noopener noreferrer";
-    preview.setAttribute("aria-label", `${asset.originalFilename} 원본 이미지 새 창에서 열기`);
+    preview.tabIndex = -1;
+    preview.setAttribute("aria-label", `${asset.originalFilename} 크게 보기`);
     const image = document.createElement("img");
     image.src = asset.thumbnailUrl;
     image.alt = asset.originalFilename;
     image.loading = "lazy";
     image.referrerPolicy = "no-referrer";
     preview.append(image);
+    preview.addEventListener("click", (event) => {
+      if (event.target !== image) return;
+      event.stopPropagation();
+      openImageViewer(asset);
+    });
     const caption = document.createElement("figcaption");
     const filename = document.createElement("strong");
     filename.textContent = asset.originalFilename;
@@ -919,7 +982,7 @@ function renderImageLibrary(items: readonly ImageAsset[]): void {
       card.focus();
     };
     card.addEventListener("click", (event) => {
-      if (event.target instanceof Element && event.target.closest("a")) return;
+      if (event.target === image) return;
       selectCard();
     });
     card.addEventListener("keydown", (event) => {
@@ -930,6 +993,18 @@ function renderImageLibrary(items: readonly ImageAsset[]): void {
     grid.append(card);
   }
   list.append(grid);
+}
+function openImageViewer(asset: ImageAsset): void {
+  const dialog = document.querySelector<HTMLDialogElement>("#image-viewer-dialog");
+  const image = document.querySelector<HTMLImageElement>("#image-viewer-image");
+  const external = document.querySelector<HTMLAnchorElement>("#image-viewer-external");
+  if (!dialog || !image || !external) return;
+  image.src = asset.originalUrl;
+  image.alt = asset.originalFilename;
+  image.referrerPolicy = "no-referrer";
+  external.href = asset.originalUrl;
+  external.setAttribute("aria-label", `${asset.originalFilename} 새 창에서 보기`);
+  if (!dialog.open) dialog.showModal();
 }
 function setImagePaletteMessage(message: string, kind: "error" | "" = ""): void {
   const target = document.querySelector<HTMLParagraphElement>("#image-palette-message");
@@ -1084,8 +1159,22 @@ function renderStandaloneImageLibraryPage(): void {
         <pre id="image-debug-details"></pre>
         <div class="dialog-actions"><button class="button primary">닫기</button></div>
       </form>
+    </dialog>
+    <dialog id="image-viewer-dialog" class="image-viewer-dialog" aria-label="이미지 크게 보기">
+      <div class="image-viewer-panel">
+        <button type="button" class="image-viewer-image-button" id="image-viewer-toggle" aria-label="이미지 크게 보기. 다시 누르면 닫힙니다." title="다시 누르면 닫힙니다.">
+          <img id="image-viewer-image" alt="" />
+        </button>
+        <div class="image-viewer-actions">
+          <a class="button primary" id="image-viewer-external" href="#" target="_blank" rel="noopener noreferrer">새창으로 보기</a>
+        </div>
+      </div>
     </dialog>`;
   document.querySelector<HTMLButtonElement>("#upload-image")!.addEventListener("click", () => { void uploadSelectedImage(); });
+  const viewer = document.querySelector<HTMLDialogElement>("#image-viewer-dialog")!;
+  document.querySelector<HTMLButtonElement>("#image-viewer-toggle")!.addEventListener("click", () => viewer.close());
+  document.querySelector<HTMLAnchorElement>("#image-viewer-external")!.addEventListener("click", () => viewer.close());
+  viewer.addEventListener("click", (event) => { if (event.target === viewer) viewer.close(); });
 }
 
 async function initializeStandaloneImageLibraryPage(): Promise<void> {

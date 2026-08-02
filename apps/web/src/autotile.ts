@@ -141,6 +141,17 @@ export function getPropNeighborMask(
   return normalizeBlobMask(mask);
 }
 
+/** Returns the water edge mask for a non-water cell so its raised bank can be rendered. */
+export function getWaterBankMask(
+  map: MapDocument,
+  column: number,
+  row: number,
+): number {
+  if (!isInside(map, column, row)) return 0;
+  if (map.cells[cellIndex(map, column, row)].ground === "water") return 0;
+  return getNeighborMask(map, column, row, "water");
+}
+
 export type BridgeConnectionShape =
   | "isolated"
   | "horizontal"

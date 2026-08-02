@@ -7,6 +7,7 @@ import {
   getPropNeighborMask,
   getNeighborMask,
   getTransitionLayers,
+  getWaterBankMask,
   normalizeBlobMask,
 } from "../src/autotile";
 import { type GroundType, type MapDocument } from "../src/editor-model";
@@ -109,6 +110,19 @@ describe("autotile calculations", () => {
     ]);
 
     expect(getTransitionLayers(map, 1, 1)).toEqual([]);
+  });
+
+  it("returns water edges only for land cells that need a raised bank", () => {
+    const map = createMap([
+      ["grass", "water", "grass"],
+      ["water", "grass", "water"],
+      ["grass", "water", "grass"],
+    ]);
+
+    expect(getWaterBankMask(map, 1, 1)).toBe(
+      NEIGHBOR_MASK.N | NEIGHBOR_MASK.E | NEIGHBOR_MASK.S | NEIGHBOR_MASK.W,
+    );
+    expect(getWaterBankMask(map, 1, 0)).toBe(0);
   });
 
   it("classifies bridge connections as horizontal, vertical, corners, and full", () => {
