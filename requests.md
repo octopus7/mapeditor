@@ -315,3 +315,11 @@
 ## Commit and push 2026-08-02 21:09:08 ~ 2026-08-02 21:10:33 (1분 25초)
 
 - Staged all verified changes, created commit `faf06d3` with an English message, and pushed `main` to `origin` successfully.
+## Diagnose login persistence 2026-08-02 21:11:50 ~ 2026-08-02 21:12:40 (0분 50초)
+
+- Confirmed the frontend stores the auth session in `sessionStorage`, so it is intentionally cleared when the browser session ends; the Worker token and D1 data are not the cause.
+## Persistent login fix and redeploy 2026-08-02 21:14:50 ~ 2026-08-02 21:16:34 (1분 44초)
+
+- Changed auth persistence to `localStorage` with one-time compatibility for the previous tab-scoped session.
+- Passed web checks, API tests (16), build verification, and live production bundle checks.
+- Redeployed Worker and Pages successfully; Worker health and D1 storage remain healthy.

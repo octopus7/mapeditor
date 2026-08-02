@@ -8,13 +8,14 @@ import {
   AuthApiError, AuthClient, isAvatarIcon, parsePublicAppConfig,
   type AuthSession, type AvatarIcon,
 } from "./auth-client";
-import { ImageLibraryClient, type ImageAsset } from "./image-library";
+import { ImageLibraryClient, ImageLibraryError, type ImageAsset } from "./image-library";
 import { MapStorageClient, resizeMap } from "./map-library";
 import { formatDeploymentTime, parseDeploymentMetadata } from "./deployment-meta";
 
 const CELL_SIZE = 36;
 const STORAGE_KEY = "mapeditor-draft-v1";
-const AUTH_STORAGE_KEY = "mapeditor-auth-v2";
+const AUTH_STORAGE_KEY = "mapeditor-auth-v3";
+const LEGACY_AUTH_STORAGE_KEY = "mapeditor-auth-v2";
 const DEFAULT_DISPLAY_NAME = "새유저";
 const avatarOptions: Array<{ id: AvatarIcon; label: string; glyph: string }> = [
   { id: "initial", label: "글자", glyph: "가" },
@@ -222,6 +223,14 @@ document.querySelector<HTMLDivElement>("#app")!.innerHTML = `
       <h2 id="auth-debug-title">개발자 로그인 진단</h2>
       <p id="auth-debug-message">허용된 개발자 접속에서만 표시되는 상세 오류입니다.</p>
       <pre id="auth-debug-details"></pre>
+      <div class="dialog-actions"><button class="button primary">닫기</button></div>
+    </form>
+  </dialog>
+  <dialog id="image-debug-dialog" class="auth-debug-dialog" aria-labelledby="image-debug-title">
+    <form method="dialog">
+      <h2 id="image-debug-title">이미지 저장 개발자 진단</h2>
+      <p id="image-debug-message">허용된 개발자 접속에서만 표시되는 상세 오류입니다.</p>
+      <pre id="image-debug-details"></pre>
       <div class="dialog-actions"><button class="button primary">닫기</button></div>
     </form>
   </dialog>
@@ -666,6 +675,7 @@ async function openImageLibrary(): Promise<void> {
     renderImageLibrary(result.images);
   } catch (error) {
     setDialogMessage("#image-library-message", error instanceof Error ? error.message : "이미지 목록을 불러오지 못했습니다.", "error");
+    showImageDebugDialog(error);
   }
 }
 async function uploadSelectedImage(): Promise<void> {
@@ -690,6 +700,7 @@ async function uploadSelectedImage(): Promise<void> {
     setDialogMessage("#image-library-message", "이미지를 저장했습니다.", "success");
   } catch (error) {
     setDialogMessage("#image-library-message", error instanceof Error ? error.message : "이미지를 저장하지 못했습니다.", "error");
+    showImageDebugDialog(error);
   } finally {
     button.disabled = false;
   }
@@ -759,12 +770,17 @@ async function toggleFullscreen(): Promise<void> {
 
 function saveAuthSession(session: AuthSession | null): void {
   authSession = session;
-  if (session) sessionStorage.setItem(AUTH_STORAGE_KEY, JSON.stringify(session));
-  else sessionStorage.removeItem(AUTH_STORAGE_KEY);
+  if (session) {
+    localStorage.setItem(AUTH_STORAGE_KEY, JSON.stringify(session));
+    sessionStorage.removeItem(LEGACY_AUTH_STORAGE_KEY);
+  } else {
+    localStorage.removeItem(AUTH_STORAGE_KEY);
+    sessionStorage.removeItem(LEGACY_AUTH_STORAGE_KEY);
+  }
 }
 
 function restoreAuthSession(): AuthSession | null {
-  const raw = sessionStorage.getItem(AUTH_STORAGE_KEY);
+  const raw = localStorage.getItem(AUTH_STORAGE_KEY) ?? sessionStorage.getItem(LEGACY_AUTH_STORAGE_KEY);
   if (!raw) return null;
   try {
     const session = JSON.parse(raw) as Partial<AuthSession>;
@@ -850,6 +866,17 @@ function showAuthDebugDialog(error: unknown): void {
   const details = document.querySelector("#auth-debug-details");
   if (!dialog || !message || !details) return;
   message.textContent = `${error.status} ${error.code}: ${error.message}`;
+  details.textContent = JSON.stringify(error.debug, null, 2);
+  if (!dialog.open) dialog.showModal();
+}
+
+function showImageDebugDialog(error: unknown): void {
+  if (!(error instanceof ImageLibraryError) || !error.debug) return;
+  const dialog = document.querySelector<HTMLDialogElement>("#image-debug-dialog");
+  const message = document.querySelector("#image-debug-message");
+  const details = document.querySelector("#image-debug-details");
+  if (!dialog || !message || !details) return;
+  message.textContent = `${error.status ?? "?"} ${error.code ?? "REQUEST_FAILED"}: ${error.message}`;
   details.textContent = JSON.stringify(error.debug, null, 2);
   if (!dialog.open) dialog.showModal();
 }

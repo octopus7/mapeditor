@@ -194,6 +194,17 @@ class ApiError extends Error {
   }
 }
 
+class ImageServiceResponseError extends Error {
+  constructor(
+    readonly upstreamStatus: number,
+    readonly upstreamStatusText: string,
+    readonly upstreamBody?: string,
+  ) {
+    super(`The image service returned HTTP ${upstreamStatus} ${upstreamStatusText}.`);
+    this.name = "ImageServiceResponseError";
+  }
+}
+
 class D1UserRepository implements UserRepository {
   constructor(private readonly database: D1Database) {}
 
@@ -597,6 +608,9 @@ interface DeveloperErrorDetails {
   path: string;
   status: number;
   cause?: string;
+  upstreamStatus?: number;
+  upstreamStatusText?: string;
+  upstreamBody?: string;
 }
 
 function redactDebugText(value: string, env: Env): string {
@@ -620,12 +634,22 @@ function developerErrorDetails(
     : source === undefined
       ? undefined
       : redactDebugText(String(source), env);
+  const imageServiceError = source instanceof ImageServiceResponseError
+    ? source
+    : undefined;
   return {
     requestId,
     method: request.method,
     path: new URL(request.url).pathname,
     status: apiError?.status ?? 500,
     ...(cause ? { cause } : {}),
+    ...(imageServiceError ? {
+      upstreamStatus: imageServiceError.upstreamStatus,
+      upstreamStatusText: redactDebugText(imageServiceError.upstreamStatusText, env),
+      ...(imageServiceError.upstreamBody
+        ? { upstreamBody: redactDebugText(imageServiceError.upstreamBody, env) }
+        : {}),
+    } : {}),
   };
 }
 
@@ -772,6 +796,20 @@ async function readUpstreamJson(response: Response): Promise<unknown> {
   }
 }
 
+async function readUpstreamErrorBody(response: Response): Promise<string | undefined> {
+  const contentLength = Number(response.headers.get("Content-Length") ?? 0);
+  if (Number.isFinite(contentLength) && contentLength > MAX_IMAGE_RESPONSE_BYTES) {
+    return `[response body omitted: larger than ${MAX_IMAGE_RESPONSE_BYTES} bytes]`;
+  }
+
+  const text = await response.text().catch(() => "");
+  if (!text.trim()) return undefined;
+  if (new TextEncoder().encode(text).byteLength > MAX_IMAGE_RESPONSE_BYTES) {
+    return `[response body omitted: larger than ${MAX_IMAGE_RESPONSE_BYTES} bytes]`;
+  }
+  return text.trim();
+}
+
 function sessionKey(secret: string): Uint8Array {
   if (new TextEncoder().encode(secret).byteLength < 32) {
     throw new ApiError(503, "SERVER_NOT_CONFIGURED", "로그인 설정이 완료되지 않았습니다.");
@@ -903,10 +941,27 @@ async function handleImageUpload(
   if (!upstream.ok) {
     if (upstream.status === 413) throw new ApiError(413, "IMAGE_TOO_LARGE", "The image is too large.");
     if (upstream.status === 429) throw new ApiError(429, "IMAGE_SERVICE_RATE_LIMITED", "The image service is busy.");
-    throw new ApiError(502, "IMAGE_SERVICE_UNAVAILABLE", "The image service could not accept the image.");
+    throw new ApiError(
+      502,
+      "IMAGE_SERVICE_UNAVAILABLE",
+      "The image service could not accept the image.",
+      new ImageServiceResponseError(
+        upstream.status,
+        upstream.statusText || "Unknown status",
+        await readUpstreamErrorBody(upstream),
+      ),
+    );
   }
 
-  const metadata = validateMemeImageResponse(await readUpstreamJson(upstream), env.MEME_IMAGE_ORIGIN);
+  let metadata: ValidatedMemeImage;
+  try {
+    metadata = validateMemeImageResponse(await readUpstreamJson(upstream), env.MEME_IMAGE_ORIGIN);
+  } catch (error) {
+    if (error instanceof ApiError) {
+      throw new ApiError(error.status, error.code, error.message, error);
+    }
+    throw error;
+  }
   const image: ImageAssetInput = {
     id: crypto.randomUUID(),
     ownerUserId,

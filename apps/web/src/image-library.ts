@@ -28,8 +28,20 @@ interface ApiErrorBody {
   error?: string | {
     code?: unknown;
     message?: unknown;
+    debug?: unknown;
   };
   message?: unknown;
+}
+
+export interface ImageDebugDetails {
+  requestId: string;
+  method: string;
+  path: string;
+  status: number;
+  cause?: string;
+  upstreamStatus?: number;
+  upstreamStatusText?: string;
+  upstreamBody?: string;
 }
 
 const MAX_ERROR_MESSAGE_LENGTH = 300;
@@ -43,6 +55,7 @@ export class ImageLibraryError extends Error {
     message: string,
     readonly status?: number,
     readonly code?: string,
+    readonly debug?: ImageDebugDetails,
   ) {
     super(message);
     this.name = "ImageLibraryError";
@@ -356,6 +369,7 @@ async function createResponseError(response: Response): Promise<ImageLibraryErro
       : typeof body?.error === "string"
         ? body.error
         : responseText.trim();
+  const debug = parseImageDebugDetails(nestedError?.debug);
 
   const fallback = response.status === 401
     ? "이미지 저장과 목록 조회에는 로그인이 필요합니다."
@@ -365,7 +379,42 @@ async function createResponseError(response: Response): Promise<ImageLibraryErro
     limitErrorMessage(message, fallback),
     response.status,
     code ?? "REQUEST_FAILED",
+    debug,
   );
+}
+
+function parseImageDebugDetails(value: unknown): ImageDebugDetails | undefined {
+  if (!isRecord(value)) return undefined;
+  const requestId = boundedDebugString(value.requestId, 128);
+  const method = boundedDebugString(value.method, 16);
+  const path = boundedDebugString(value.path, 256);
+  const status = boundedDebugNumber(value.status);
+  if (!requestId || !method || !path || status === undefined) return undefined;
+
+  const cause = boundedDebugString(value.cause, MAX_ERROR_MESSAGE_LENGTH);
+  const upstreamStatus = boundedDebugNumber(value.upstreamStatus);
+  const upstreamStatusText = boundedDebugString(value.upstreamStatusText, 100);
+  const upstreamBody = boundedDebugString(value.upstreamBody, MAX_ERROR_MESSAGE_LENGTH);
+  return {
+    requestId,
+    method,
+    path,
+    status,
+    ...(cause ? { cause } : {}),
+    ...(upstreamStatus === undefined ? {} : { upstreamStatus }),
+    ...(upstreamStatusText ? { upstreamStatusText } : {}),
+    ...(upstreamBody ? { upstreamBody } : {}),
+  };
+}
+
+function boundedDebugString(value: unknown, maxLength: number): string | undefined {
+  if (typeof value !== "string" || hasControlCharacter(value)) return undefined;
+  const normalized = value.trim();
+  return normalized && normalized.length <= maxLength ? normalized : undefined;
+}
+
+function boundedDebugNumber(value: unknown): number | undefined {
+  return typeof value === "number" && Number.isSafeInteger(value) ? value : undefined;
 }
 
 function limitErrorMessage(value: string, fallback: string): string {
