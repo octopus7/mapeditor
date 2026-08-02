@@ -372,6 +372,13 @@
 - Kept the logged-in profile control in the same account section and made the guest account section visible only through the menu.
 - Passed web checks (39), API tests (18), deployed Worker and Pages, and verified the production bundle and Worker health.
 
+## Add wheel zoom and 1/8 minimum scale 2026-08-02 21:43:00 ~ 2026-08-02 21:46:40 (3분 40초)
+
+- Lowered the map viewport minimum zoom from 50% to 12.5% (1/8 scale).
+- Added wheel rotation zooming across the map viewport with cursor-centered zoom so the focused map position stays under the pointer.
+- Preserved the existing middle-button/drag panning behavior.
+- Passed web checks (39), deployed Worker and Pages, and verified the live bundle contains the wheel zoom and 12.5% limit.
+
 ## Verify unauthenticated image API access 2026-08-02 21:38:25 ~ 2026-08-02 21:39:23 (0분 58초)
 
 - Reviewed the Worker route and confirmed both `GET /images` and `POST /images` call `requireProfile()` before accessing image data or the upload service.

@@ -16,6 +16,7 @@ const CELL_SIZE = 36;
 const STORAGE_KEY = "mapeditor-draft-v1";
 const AUTH_STORAGE_KEY = "mapeditor-auth-v3";
 const LEGACY_AUTH_STORAGE_KEY = "mapeditor-auth-v2";
+const isImageLibraryPage = /^\/images\/?$/u.test(window.location.pathname);
 const DEFAULT_DISPLAY_NAME = "새유저";
 const avatarOptions: Array<{ id: AvatarIcon; label: string; glyph: string }> = [
   { id: "initial", label: "글자", glyph: "가" },
@@ -252,16 +253,6 @@ document.querySelector<HTMLDivElement>("#app")!.innerHTML = `
       <div class="dialog-actions"><button class="button ghost" value="cancel">닫기</button></div>
     </form>
   </dialog>
-  <dialog id="image-library-dialog" class="editor-dialog image-library-dialog">
-    <form method="dialog">
-      <h2>내 이미지</h2>
-      <p class="dialog-note">로그인한 사용자만 이미지를 저장하고 목록을 볼 수 있습니다.</p>
-      <div class="image-upload-row"><input id="image-upload-input" type="file" accept="image/jpeg,image/png,image/webp,image/gif" /><button class="button primary" type="button" id="upload-image">이미지 저장</button></div>
-      <p class="dialog-message" id="image-library-message"></p>
-      <div id="image-library-list" class="image-library-list"></div>
-      <div class="dialog-actions"><button class="button ghost" value="cancel">닫기</button></div>
-    </form>
-  </dialog>
   <dialog id="resize-map-dialog" class="editor-dialog">
     <form method="dialog">
       <h2>맵 크기 조정</h2>
@@ -330,6 +321,7 @@ setupDeveloperAccessUi();
 
 const canvas = document.querySelector<HTMLCanvasElement>("#map-canvas")!;
 const canvasFrame = document.querySelector<HTMLDivElement>("#canvas-frame")!;
+const canvasScroll = document.querySelector<HTMLDivElement>(".canvas-scroll")!;
 const context = canvas.getContext("2d")!;
 function syncCanvasSize(): void {
   canvas.width = map.columns * CELL_SIZE;
@@ -441,9 +433,10 @@ function render(): void {
   }
   updateHistoryButtons();
 }
-const MIN_ZOOM = .5;
+const MIN_ZOOM = .125;
 const MAX_ZOOM = 2.5;
 const ZOOM_STEP = .25;
+const WHEEL_ZOOM_FACTOR = 1.1;
 function updateViewport(): void {
   canvasFrame.style.setProperty("--map-zoom", String(zoom));
   canvasFrame.style.setProperty("--pan-x", `${panX}px`);
@@ -456,8 +449,18 @@ function updateViewport(): void {
   document.querySelector<HTMLButtonElement>("#toggle-pan")!.classList.toggle("active", panMode);
   document.querySelector<HTMLButtonElement>("#toggle-pan")!.setAttribute("aria-pressed", String(panMode));
 }
-function setZoom(nextZoom: number): void {
-  zoom = Math.max(MIN_ZOOM, Math.min(MAX_ZOOM, nextZoom));
+function setZoom(nextZoom: number, focus?: { x: number; y: number }): void {
+  const next = Math.max(MIN_ZOOM, Math.min(MAX_ZOOM, nextZoom));
+  if (next === zoom) return;
+  if (focus) {
+    const viewport = canvasScroll.getBoundingClientRect();
+    const focusX = focus.x - (viewport.left + viewport.width / 2);
+    const focusY = focus.y - (viewport.top + viewport.height / 2);
+    const ratio = next / zoom;
+    panX = focusX - (focusX - panX) * ratio;
+    panY = focusY - (focusY - panY) * ratio;
+  }
+  zoom = next;
   updateViewport();
 }
 function resetViewport(): void {
@@ -681,7 +684,9 @@ async function openMapLibrary(): Promise<void> {
 }
 function renderImageLibrary(items: readonly ImageAsset[]): void {
   const list = document.querySelector<HTMLDivElement>("#image-library-list")!;
+  const count = document.querySelector<HTMLSpanElement>("#image-page-count");
   list.replaceChildren();
+  if (count) count.textContent = items.length ? `${items.length}개` : "";
   if (items.length === 0) {
     const empty = document.createElement("div");
     empty.className = "empty-library";
@@ -710,21 +715,64 @@ function renderImageLibrary(items: readonly ImageAsset[]): void {
   }
   list.append(grid);
 }
-async function openImageLibrary(): Promise<void> {
-  setFileMenuOpen(false);
-  const dialog = document.querySelector<HTMLDialogElement>("#image-library-dialog")!;
-  document.querySelector<HTMLInputElement>("#image-upload-input")!.value = "";
-  document.querySelector<HTMLButtonElement>("#upload-image")!.disabled = !authSession || !imageLibraryClient;
+function renderStandaloneImageLibraryPage(): void {
+  document.title = "내 이미지 · Forest Map Editor";
+  document.querySelector<HTMLDivElement>("#app")!.innerHTML = `
+    <div class="image-page-shell">
+      <header class="image-page-header">
+        <a class="brand" href="/" aria-label="Forest Map Editor 홈">
+          <span class="brand-mark" aria-hidden="true">✦</span>
+          <span><strong>FOREST</strong><small>IMAGE LIBRARY</small></span>
+        </a>
+        <a class="button ghost image-page-back" href="/">지도 편집기로 돌아가기</a>
+      </header>
+      <main class="image-page-main">
+        <section class="image-page-card" aria-labelledby="image-page-title">
+          <div class="image-page-heading">
+            <div>
+              <span class="eyebrow">MY IMAGES</span>
+              <h1 id="image-page-title">내 이미지</h1>
+              <p>로그인한 사용자만 이미지를 저장하고 목록을 볼 수 있습니다.</p>
+            </div>
+            <span class="image-page-count" id="image-page-count"></span>
+          </div>
+          <div class="image-upload-row image-page-upload">
+            <input id="image-upload-input" type="file" accept="image/jpeg,image/png,image/webp,image/gif" />
+            <button class="button primary" type="button" id="upload-image">이미지 저장</button>
+          </div>
+          <p class="dialog-message" id="image-library-message"></p>
+          <div id="image-library-list" class="image-library-list image-page-list"></div>
+        </section>
+      </main>
+      <footer class="image-page-footer"><a href="/">지도 편집기로 돌아가기</a><span>개인 이미지 보관함</span></footer>
+    </div>
+    <dialog id="image-debug-dialog" class="auth-debug-dialog" aria-labelledby="image-debug-title">
+      <form method="dialog">
+        <h2 id="image-debug-title">이미지 저장 개발자 진단</h2>
+        <p id="image-debug-message">허용된 개발자 접속에서만 표시되는 상세 오류입니다.</p>
+        <pre id="image-debug-details"></pre>
+        <div class="dialog-actions"><button class="button primary">닫기</button></div>
+      </form>
+    </dialog>`;
+  document.querySelector<HTMLButtonElement>("#upload-image")!.addEventListener("click", () => { void uploadSelectedImage(); });
+}
+
+async function initializeStandaloneImageLibraryPage(): Promise<void> {
+  await initializeAuth();
+  document.querySelector<HTMLDialogElement>("#auth-dialog")?.remove();
+  renderStandaloneImageLibraryPage();
+  const input = document.querySelector<HTMLInputElement>("#image-upload-input")!;
+  const button = document.querySelector<HTMLButtonElement>("#upload-image")!;
   if (!authSession || !imageLibraryClient) {
-    setDialogMessage("#image-library-message", "이미지 저장과 목록 조회는 로그인이 필요합니다.", "error");
-    dialog.showModal();
+    input.disabled = true;
+    button.disabled = true;
+    setDialogMessage("#image-library-message", "이미지 저장과 목록 조회는 로그인이 필요합니다. 메인 페이지에서 로그인해 주세요.", "error");
     return;
   }
   setDialogMessage("#image-library-message", "저장한 이미지를 불러오는 중입니다.");
-  dialog.showModal();
   try {
     const result = await imageLibraryClient.listImages(authSession.token);
-    setDialogMessage("#image-library-message", result.images.length ? "저장한 이미지" : "");
+    setDialogMessage("#image-library-message", result.images.length ? "저장한 이미지" : "저장한 이미지가 없습니다.");
     renderImageLibrary(result.images);
   } catch (error) {
     setDialogMessage("#image-library-message", error instanceof Error ? error.message : "이미지 목록을 불러오지 못했습니다.", "error");
@@ -1176,6 +1224,12 @@ canvas.addEventListener("pointercancel", (event) => {
 });
 canvas.addEventListener("contextmenu", (event) => event.preventDefault());
 canvas.addEventListener("pointerleave", () => { document.querySelector("#cursor-status")!.textContent = "셀 위에 커서를 올려보세요"; });
+canvasScroll.addEventListener("wheel", (event) => {
+  if (event.deltaY === 0) return;
+  event.preventDefault();
+  const nextZoom = zoom * Math.pow(WHEEL_ZOOM_FACTOR, -event.deltaY / 100);
+  setZoom(nextZoom, { x: event.clientX, y: event.clientY });
+}, { passive: false });
 
 document.querySelectorAll<HTMLButtonElement>("[data-layer]").forEach((button) => button.addEventListener("click", () => {
   selectedLayer = button.dataset.layer as Layer;
@@ -1228,10 +1282,9 @@ document.querySelector("#export-png")!.addEventListener("click", () => {
 document.querySelector("#save-map")!.addEventListener("click", () => openMapSaveDialog(false));
 document.querySelector("#save-map-as")!.addEventListener("click", () => openMapSaveDialog(true));
 document.querySelector("#open-map-library")!.addEventListener("click", () => { void openMapLibrary(); });
-document.querySelector("#open-image-library")!.addEventListener("click", () => { void openImageLibrary(); });
+document.querySelector("#open-image-library")!.addEventListener("click", () => { window.location.assign("/images/"); });
 document.querySelector("#open-resize-map")!.addEventListener("click", openResizeMapDialog);
 document.querySelector("#confirm-map-save")!.addEventListener("click", () => { void saveMapToCloud(); });
-document.querySelector("#upload-image")!.addEventListener("click", () => { void uploadSelectedImage(); });
 document.querySelector("#confirm-resize-map")!.addEventListener("click", applyMapResize);
 document.querySelector("#file-menu-toggle")!.addEventListener("click", (event) => {
   event.stopPropagation();
@@ -1315,7 +1368,7 @@ document.querySelector("#logout")!.addEventListener("click", async () => {
     saveAuthSession(null);
     window.google?.accounts.id.disableAutoSelect();
     document.querySelector<HTMLDialogElement>("#profile-dialog")!.close();
-    for (const id of ["#map-save-dialog", "#map-library-dialog", "#image-library-dialog"]) {
+    for (const id of ["#map-save-dialog", "#map-library-dialog"]) {
       const dialog = document.querySelector<HTMLDialogElement>(id);
       if (dialog?.open) dialog.close();
     }
@@ -1330,5 +1383,9 @@ setPropMode(propMode);
 updateFullscreenButton();
 updateViewport();
 render();
-void initializeDeploymentTime();
-void initializeAuth();
+if (isImageLibraryPage) {
+  void initializeStandaloneImageLibraryPage();
+} else {
+  void initializeDeploymentTime();
+  void initializeAuth();
+}
