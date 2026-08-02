@@ -13,6 +13,21 @@ export interface AuthSession {
   token: string;
 }
 
+export interface AdminUser extends AuthProfile {
+  isAdmin: boolean;
+}
+
+export interface AdminMapSummary {
+  id: string;
+  name: string;
+  createdAt?: string;
+  updatedAt?: string;
+}
+
+export interface AdminMap extends AdminMapSummary {
+  payload: unknown;
+}
+
 export interface PublicAppConfig {
   apiBaseUrl: string;
   googleClientId: string;
@@ -102,6 +117,62 @@ export class AuthClient {
     }
 
     if (response.status === 204) return undefined as T;
+    return response.json() as Promise<T>;
+  }
+}
+
+export class AdminClient {
+  constructor(private readonly baseUrl: string) {}
+
+  async listUsers(token?: string): Promise<AdminUser[]> {
+    const response = await this.request<{ users: AdminUser[] }>("/admin/users", token);
+    if (!Array.isArray(response.users)) throw new Error("The administrator API returned an invalid user list.");
+    return response.users;
+  }
+
+  async promoteUser(userId: string, token?: string): Promise<AdminUser> {
+    const response = await this.request<{ user: AdminUser }>(
+      `/admin/users/${encodeURIComponent(userId)}/admin`,
+      token,
+      { method: "POST" },
+    );
+    return response.user;
+  }
+
+  async listMaps(userId: string, token?: string): Promise<AdminMapSummary[]> {
+    const response = await this.request<{ maps: AdminMapSummary[] }>(
+      `/admin/users/${encodeURIComponent(userId)}/maps`,
+      token,
+    );
+    if (!Array.isArray(response.maps)) throw new Error("The administrator API returned an invalid map list.");
+    return response.maps;
+  }
+
+  async loadMap(userId: string, mapId: string, token?: string): Promise<AdminMap> {
+    const response = await this.request<{ map: AdminMap }>(
+      `/admin/users/${encodeURIComponent(userId)}/maps/${encodeURIComponent(mapId)}`,
+      token,
+    );
+    return response.map;
+  }
+
+  private async request<T>(path: string, token?: string, init: RequestInit = {}): Promise<T> {
+    const headers = new Headers(init.headers);
+    headers.set("Accept", "application/json");
+    if (token) headers.set("Authorization", `Bearer ${token}`);
+    if (init.body !== undefined) headers.set("Content-Type", "application/json");
+
+    const response = await fetch(`${this.baseUrl}${path}`, { ...init, headers });
+    if (!response.ok) {
+      const body = await response.json().catch(() => ({})) as ApiErrorBody;
+      const nestedError = typeof body.error === "object" ? body.error : undefined;
+      throw new AuthApiError(
+        response.status,
+        nestedError?.code ?? (typeof body.error === "string" ? body.error : "REQUEST_FAILED"),
+        nestedError?.message ?? body.message ?? "Administrator API request failed.",
+        nestedError?.debug,
+      );
+    }
     return response.json() as Promise<T>;
   }
 }

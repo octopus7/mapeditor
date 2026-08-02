@@ -36,6 +36,13 @@ export interface UserRepository {
   findById(id: string): Promise<Profile | null>;
   saveGoogleLogin(identity: GoogleIdentity): Promise<Profile>;
   updateProfile(id: string, displayName: string, avatarIcon: AvatarIcon): Promise<Profile | null>;
+  isAdmin?(id: string): Promise<boolean>;
+  listUsers?(limit: number): Promise<AdminUser[]>;
+  promoteToAdmin?(id: string): Promise<AdminUser | null>;
+}
+
+export interface AdminUser extends Profile {
+  isAdmin: boolean;
 }
 
 export interface ImageAsset {
@@ -181,6 +188,7 @@ interface UserRow {
   email: string;
   display_name: string;
   avatar_icon: AvatarIcon;
+  is_admin: number;
 }
 
 class ApiError extends Error {
@@ -214,6 +222,40 @@ class D1UserRepository implements UserRepository {
       .bind(id)
       .first<UserRow>();
     return row ? profileFromRow(row) : null;
+  }
+
+  async isAdmin(id: string): Promise<boolean> {
+    const row = await this.database
+      .prepare("SELECT is_admin FROM users WHERE id = ?1")
+      .bind(id)
+      .first<Pick<UserRow, "is_admin">>();
+    return row?.is_admin === 1;
+  }
+
+  async listUsers(limit: number): Promise<AdminUser[]> {
+    const result = await this.database
+      .prepare(
+        `SELECT id, email, display_name, avatar_icon, is_admin
+         FROM users
+         ORDER BY created_at ASC, id ASC
+         LIMIT ?1`,
+      )
+      .bind(limit)
+      .all<UserRow>();
+    return result.results.map(adminUserFromRow);
+  }
+
+  async promoteToAdmin(id: string): Promise<AdminUser | null> {
+    const row = await this.database
+      .prepare(
+        `UPDATE users
+         SET is_admin = 1, updated_at = CURRENT_TIMESTAMP
+         WHERE id = ?1
+         RETURNING id, email, display_name, avatar_icon, is_admin`,
+      )
+      .bind(id)
+      .first<UserRow>();
+    return row ? adminUserFromRow(row) : null;
   }
 
   async saveGoogleLogin(identity: GoogleIdentity): Promise<Profile> {
@@ -417,6 +459,13 @@ function profileFromRow(row: UserRow): Profile {
     email: row.email,
     displayName: row.display_name,
     avatarIcon: row.avatar_icon,
+  };
+}
+
+function adminUserFromRow(row: UserRow): AdminUser {
+  return {
+    ...profileFromRow(row),
+    isAdmin: row.is_admin === 1,
   };
 }
 
@@ -890,6 +939,27 @@ async function requireProfile(
   return profile;
 }
 
+async function requireAdminAccess(
+  request: Request,
+  env: Env,
+  users: UserRepository,
+): Promise<void> {
+  if (isDeveloperDebugRequest(request, env)) return;
+  const userId = await readSessionUserId(request, env.SESSION_SECRET);
+  if (!users.isAdmin || !(await users.isAdmin(userId))) {
+    throw new ApiError(403, "ADMIN_REQUIRED", "Administrator access is required.");
+  }
+}
+
+function requireAdminRepository(
+  users: UserRepository,
+  method: "listUsers" | "promoteToAdmin",
+): void {
+  if (typeof users[method] !== "function") {
+    throw new ApiError(503, "SERVER_NOT_CONFIGURED", "Administrator storage is not configured.");
+  }
+}
+
 function requireRepository<T>(repository: T | undefined, name: string): T {
   if (!repository) {
     throw new ApiError(503, "SERVER_NOT_CONFIGURED", `${name} storage is not configured.`);
@@ -1042,6 +1112,54 @@ async function route(
       throw new ApiError(401, "INVALID_SESSION", "로그인 계정을 찾을 수 없습니다.");
     }
     return json({ profile });
+  }
+  if (request.method === "GET" && url.pathname === "/admin/users") {
+    await requireAdminAccess(request, env, users);
+    requireAdminRepository(users, "listUsers");
+    return json({ users: await users.listUsers!(listLimit(url)) });
+  }
+  const adminUserMatch = url.pathname.match(/^\/admin\/users\/([^/]+)\/admin$/u);
+  if (request.method === "POST" && adminUserMatch) {
+    await requireAdminAccess(request, env, users);
+    let userId: string;
+    try {
+      userId = decodeURIComponent(adminUserMatch[1]);
+    } catch {
+      throw new ApiError(400, "INVALID_USER_ID", "The user id is invalid.");
+    }
+    if (!userId || userId.length > 200) {
+      throw new ApiError(400, "INVALID_USER_ID", "The user id is invalid.");
+    }
+    requireAdminRepository(users, "promoteToAdmin");
+    const user = await users.promoteToAdmin!(userId);
+    if (!user) throw new ApiError(404, "USER_NOT_FOUND", "The user was not found.");
+    return json({ user });
+  }
+  const adminUserMapsMatch = url.pathname.match(/^\/admin\/users\/([^/]+)\/maps(?:\/([^/]+))?$/u);
+  if (request.method === "GET" && adminUserMapsMatch) {
+    await requireAdminAccess(request, env, users);
+    let userId: string;
+    try {
+      userId = decodeURIComponent(adminUserMapsMatch[1]);
+    } catch {
+      throw new ApiError(400, "INVALID_USER_ID", "The user id is invalid.");
+    }
+    if (!userId || userId.length > 200) {
+      throw new ApiError(400, "INVALID_USER_ID", "The user id is invalid.");
+    }
+    const mapRepository = requireRepository(maps, "Map");
+    if (!adminUserMapsMatch[2]) {
+      return json({ maps: await mapRepository.listByOwner(userId, listLimit(url)) });
+    }
+    let mapId: string;
+    try {
+      mapId = decodeURIComponent(adminUserMapsMatch[2]);
+    } catch {
+      throw new ApiError(400, "INVALID_MAP_ID", "The map id is invalid.");
+    }
+    const map = await mapRepository.findById(userId, mapId);
+    if (!map) throw new ApiError(404, "MAP_NOT_FOUND", "The map was not found.");
+    return json({ map });
   }
   if (request.method === "POST" && url.pathname === "/images") {
     const currentProfile = await requireProfile(request, env, users);

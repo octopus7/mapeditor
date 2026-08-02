@@ -1,7 +1,10 @@
 import { describe, expect, it } from "vitest";
 import {
   GROUND_PRIORITY,
+  BRIDGE_CARDINAL_MASK,
   NEIGHBOR_MASK,
+  getBridgeConnectionDirections,
+  getBridgeEndpointMask,
   getBridgeConnectionShape,
   getBridgeTextureRotation,
   getPropNeighborMask,
@@ -132,6 +135,21 @@ describe("autotile calculations", () => {
     expect(getBridgeConnectionShape(255)).toBe("full");
     expect(getBridgeTextureRotation("horizontal")).toBe(90);
     expect(getBridgeTextureRotation("vertical")).toBe(0);
+  });
+
+  it("returns bridge arms and exposed endpoints independently of diagonal bits", () => {
+    const cornerMask = NEIGHBOR_MASK.N | NEIGHBOR_MASK.E | NEIGHBOR_MASK.NE;
+
+    expect(getBridgeConnectionDirections(cornerMask)).toEqual(["N", "E"]);
+    expect(getBridgeEndpointMask(cornerMask)).toBe(NEIGHBOR_MASK.S | NEIGHBOR_MASK.W);
+    expect(getBridgeEndpointMask(NEIGHBOR_MASK.E | NEIGHBOR_MASK.W)).toBe(0);
+    expect(getBridgeEndpointMask(NEIGHBOR_MASK.E)).toBe(NEIGHBOR_MASK.W);
+    expect(getBridgeEndpointMask(NEIGHBOR_MASK.N)).toBe(NEIGHBOR_MASK.S);
+    expect(getBridgeConnectionDirections(255)).toEqual(["N", "E", "S", "W"]);
+    expect(getBridgeEndpointMask(255)).toBe(0);
+    expect(BRIDGE_CARDINAL_MASK).toBe(
+      NEIGHBOR_MASK.N | NEIGHBOR_MASK.E | NEIGHBOR_MASK.S | NEIGHBOR_MASK.W,
+    );
   });
 
   it("connects bridge props through cardinal and supported diagonal neighbors", () => {

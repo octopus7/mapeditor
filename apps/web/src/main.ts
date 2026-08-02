@@ -4,10 +4,20 @@ import {
   moveProp, paintGround, placeImage, placeProp, removeImage, serializeMap, setTileElevation, updateImageTransform,
   type GroundType, type MapDocument, type MapImagePlacement, type PropType, type TileElevation,
 } from "./editor-model";
-import { getBridgeConnectionShape, getBridgeTextureRotation, getPropNeighborMask, getTransitionLayers, getWaterBankMask, NEIGHBOR_MASK } from "./autotile";
 import {
-  AuthApiError, AuthClient, isAvatarIcon, parsePublicAppConfig,
-  type AuthSession, type AvatarIcon,
+  getBridgeConnectionDirections,
+  getBridgeConnectionShape,
+  getBridgeEndpointMask,
+  getBridgeTextureRotation,
+  getPropNeighborMask,
+  getTransitionLayers,
+  getWaterBankMask,
+  NEIGHBOR_MASK,
+  type BridgeDirection,
+} from "./autotile";
+import {
+  AdminClient, AuthApiError, AuthClient, isAvatarIcon, parsePublicAppConfig,
+  type AdminMapSummary, type AdminUser, type AuthSession, type AvatarIcon,
 } from "./auth-client";
 import { ImageLibraryClient, ImageLibraryError, type ImageAsset } from "./image-library";
 import { getResizeOffsets, MAX_MAP_SIZE, MIN_MAP_SIZE, MapStorageClient, resizeMap, type ResizeAnchor } from "./map-library";
@@ -43,6 +53,39 @@ const propOptions: Array<{ id: PropType; label: string; image: string }> = [
   { id: "fallen-log", label: "쓰러진 통나무", image: "/assets/props/fallen-log.png" },
   { id: "footbridge", label: "나무다리", image: "/assets/props/footbridge.png" },
 ];
+type ImageMaterialTab = "default" | "mine";
+const defaultImageAssets: readonly ImageAsset[] = [
+  { id: "builtin:rune-shrine", originalFilename: "룬 석비", originalUrl: "/assets/landmarks/rune-shrine.png", thumbnailUrl: "/assets/landmarks/rune-shrine.png", mimeType: "image/png", byteSize: 1, createdAt: "static" },
+  { id: "builtin:stone-archway", originalFilename: "이끼 낀 석조 아치", originalUrl: "/assets/landmarks/stone-archway.png", thumbnailUrl: "/assets/landmarks/stone-archway.png", mimeType: "image/png", byteSize: 1, createdAt: "static" },
+  { id: "builtin:wayfinder-post", originalFilename: "숲길 방향 표지", originalUrl: "/assets/landmarks/wayfinder-post.png", thumbnailUrl: "/assets/landmarks/wayfinder-post.png", mimeType: "image/png", byteSize: 1, createdAt: "static" },
+  { id: "builtin:ancient-well", originalFilename: "고대 우물", originalUrl: "/assets/landmarks/ancient-well.png", thumbnailUrl: "/assets/landmarks/ancient-well.png", mimeType: "image/png", byteSize: 1, createdAt: "static" },
+  { id: "builtin:fairy-lantern", originalFilename: "요정 랜턴", originalUrl: "/assets/landmarks/fairy-lantern.png", thumbnailUrl: "/assets/landmarks/fairy-lantern.png", mimeType: "image/png", byteSize: 1, createdAt: "static" },
+  { id: "builtin:moon-sundial", originalFilename: "달빛 해시계", originalUrl: "/assets/landmarks/moon-sundial.png", thumbnailUrl: "/assets/landmarks/moon-sundial.png", mimeType: "image/png", byteSize: 1, createdAt: "static" },
+  { id: "builtin:owl-totem", originalFilename: "부엉이 토템", originalUrl: "/assets/landmarks/owl-totem.png", thumbnailUrl: "/assets/landmarks/owl-totem.png", mimeType: "image/png", byteSize: 1, createdAt: "static" },
+  { id: "builtin:forest-watchtower", originalFilename: "숲 감시탑", originalUrl: "/assets/landmarks/forest-watchtower.png", thumbnailUrl: "/assets/landmarks/forest-watchtower.png", mimeType: "image/png", byteSize: 1, createdAt: "static" },
+  { id: "builtin:standing-stone-ring", originalFilename: "선돌 고리", originalUrl: "/assets/landmarks/standing-stone-ring.png", thumbnailUrl: "/assets/landmarks/standing-stone-ring.png", mimeType: "image/png", byteSize: 1, createdAt: "static" },
+  { id: "builtin:dryad-statue", originalFilename: "드라이어드 석상", originalUrl: "/assets/landmarks/dryad-statue.png", thumbnailUrl: "/assets/landmarks/dryad-statue.png", mimeType: "image/png", byteSize: 1, createdAt: "static" },
+  { id: "builtin:shrine-altar", originalFilename: "숲의 제단", originalUrl: "/assets/landmarks/shrine-altar.png", thumbnailUrl: "/assets/landmarks/shrine-altar.png", mimeType: "image/png", byteSize: 1, createdAt: "static" },
+  { id: "builtin:stump-throne", originalFilename: "고목 왕좌", originalUrl: "/assets/landmarks/stump-throne.png", thumbnailUrl: "/assets/landmarks/stump-throne.png", mimeType: "image/png", byteSize: 1, createdAt: "static" },
+  { id: "builtin:crystal-cluster", originalFilename: "청록 수정 군락", originalUrl: "/assets/landmarks/crystal-cluster.png", thumbnailUrl: "/assets/landmarks/crystal-cluster.png", mimeType: "image/png", byteSize: 1, createdAt: "static" },
+  { id: "builtin:boundary-bell", originalFilename: "숲 경계 종", originalUrl: "/assets/landmarks/boundary-bell.png", thumbnailUrl: "/assets/landmarks/boundary-bell.png", mimeType: "image/png", byteSize: 1, createdAt: "static" },
+  { id: "builtin:stair-marker", originalFilename: "나선 계단 표식", originalUrl: "/assets/landmarks/stair-marker.png", thumbnailUrl: "/assets/landmarks/stair-marker.png", mimeType: "image/png", byteSize: 1, createdAt: "static" },
+  { id: "builtin:ranger-board", originalFilename: "순찰 게시판", originalUrl: "/assets/landmarks/ranger-board.png", thumbnailUrl: "/assets/landmarks/ranger-board.png", mimeType: "image/png", byteSize: 1, createdAt: "static" },
+  { id: "builtin:meditation-pavilion", originalFilename: "명상 정자", originalUrl: "/assets/landmarks/meditation-pavilion.png", thumbnailUrl: "/assets/landmarks/meditation-pavilion.png", mimeType: "image/png", byteSize: 1, createdAt: "static" },
+  { id: "builtin:sealed-door", originalFilename: "봉인된 석문", originalUrl: "/assets/landmarks/sealed-door.png", thumbnailUrl: "/assets/landmarks/sealed-door.png", mimeType: "image/png", byteSize: 1, createdAt: "static" },
+  { id: "builtin:antler-shrine", originalFilename: "뿔 장식 제단", originalUrl: "/assets/landmarks/antler-shrine.png", thumbnailUrl: "/assets/landmarks/antler-shrine.png", mimeType: "image/png", byteSize: 1, createdAt: "static" },
+  { id: "builtin:guardian-mask", originalFilename: "숲 수호자 가면", originalUrl: "/assets/landmarks/guardian-mask.png", thumbnailUrl: "/assets/landmarks/guardian-mask.png", mimeType: "image/png", byteSize: 1, createdAt: "static" },
+];
+// Keep the former built-in ids resolvable for old drafts/maps, but do not expose
+// them in the new default landmark palette.
+const legacyBuiltInImageAssets: readonly ImageAsset[] = [
+  { id: "builtin:broadleaf-tree", originalFilename: "넓은잎 나무", originalUrl: "/assets/props/broadleaf-tree.png", thumbnailUrl: "/assets/props/broadleaf-tree.png", mimeType: "image/png", byteSize: 1, createdAt: "legacy" },
+  { id: "builtin:pine-tree", originalFilename: "소나무", originalUrl: "/assets/props/pine-tree.png", thumbnailUrl: "/assets/props/pine-tree.png", mimeType: "image/png", byteSize: 1, createdAt: "legacy" },
+  { id: "builtin:shrub", originalFilename: "관목", originalUrl: "/assets/props/shrub.png", thumbnailUrl: "/assets/props/shrub.png", mimeType: "image/png", byteSize: 1, createdAt: "legacy" },
+  { id: "builtin:boulder", originalFilename: "바위", originalUrl: "/assets/props/boulder.png", thumbnailUrl: "/assets/props/boulder.png", mimeType: "image/png", byteSize: 1, createdAt: "legacy" },
+  { id: "builtin:fallen-log", originalFilename: "쓰러진 통나무", originalUrl: "/assets/props/fallen-log.png", thumbnailUrl: "/assets/props/fallen-log.png", mimeType: "image/png", byteSize: 1, createdAt: "legacy" },
+];
+const defaultImageAssetsById = new Map([...defaultImageAssets, ...legacyBuiltInImageAssets].map((asset) => [asset.id, asset]));
 type Layer = "ground" | "prop" | "image";
 type GroundEditTab = "terrain" | "elevation";
 type PropMode = "place" | "move" | "erase";
@@ -62,10 +105,10 @@ type MovingImage = {
 
 let map = restoreDraft() ?? createInitialMap();
 let savedMapId: string | null = null;
-let selectedGroundEditTab: GroundEditTab = "terrain";
 let selectedLayer: Layer = "ground";
-let selectedTileElevation: TileElevation = 1;
+let selectedGroundEditTab: GroundEditTab = "terrain";
 let selectedGround: GroundType = "grass";
+let selectedTileElevation: TileElevation = 1;
 let selectedProp: PropType = "broadleaf-tree";
 let gridVisible = true;
 let isDrawing = false;
@@ -73,7 +116,9 @@ let strokeChanged = false;
 let propMode: PropMode = "place";
 let movingProp: MovingProp | null = null;
 let imageMode: PropMode = "place";
+let imageContinuousPlacement = false;
 let movingImage: MovingImage | null = null;
+let imageMaterialTab: ImageMaterialTab = "default";
 let selectedImageId: string | null = null;
 let selectedImagePlacementIndex: number | null = null;
 let selectedImageRotation = DEFAULT_IMAGE_ROTATION;
@@ -84,6 +129,7 @@ let history: MapDocument[] = [];
 let future: MapDocument[] = [];
 let saveTimer: number | undefined;
 let authClient: AuthClient | null = null;
+let adminClient: AdminClient | null = null;
 let imageLibraryClient: ImageLibraryClient | null = null;
 let mapStorageClient: MapStorageClient | null = null;
 let authSession: AuthSession | null = null;
@@ -108,6 +154,8 @@ let panStartY = 0;
 let panOriginX = 0;
 let panOriginY = 0;
 let spacePressed = false;
+let developerAccess = false;
+let adminAccess = false;
 
 document.querySelector<HTMLDivElement>("#app")!.innerHTML = `
   <div class="app-shell">
@@ -153,19 +201,22 @@ document.querySelector<HTMLDivElement>("#app")!.innerHTML = `
         <div class="layer-tabs" role="tablist" aria-label="편집 레이어">
           <button class="layer-tab active" data-layer="ground">타일</button>
           <button class="layer-tab" data-layer="prop">사물</button>
+          <button class="layer-tab" data-layer="image">이미지</button>
+        </div>
+        <section class="palette-section" id="ground-palette">
           <div class="ground-edit-tabs" role="tablist" aria-label="타일 편집 종류">
             <button class="ground-edit-tab active" type="button" data-ground-edit-tab="terrain" role="tab" aria-selected="true">지형</button>
             <button class="ground-edit-tab" type="button" data-ground-edit-tab="elevation" role="tab" aria-selected="false">레이어</button>
           </div>
           <section id="terrain-palette">
-          <button class="layer-tab" data-layer="image">이미지</button>
-        </div>
-        <section class="palette-section" id="ground-palette">
           <div class="section-label"><span>GROUND</span><span>4종</span></div>
           <div class="ground-list">
             ${groundOptions.map((item, index) => `
               <button class="ground-option ${index === 0 ? "selected" : ""}" data-ground="${item.id}">
                 <span class="ground-swatch ${item.id}"></span>
+                <span><strong>${item.label}</strong><small>${item.hint}</small></span><span class="check">✓</span>
+              </button>`).join("")}
+          </div>
           </section>
           <section class="hidden" id="elevation-palette">
             <div class="section-label"><span>TILE HEIGHT</span><span>1 TILE</span></div>
@@ -181,9 +232,6 @@ document.querySelector<HTMLDivElement>("#app")!.innerHTML = `
             </div>
             <p class="tile-elevation-hint">물 타일은 올릴 수 없습니다. 비물 타일을 드래그해 높이를 칠하세요.</p>
           </section>
-                <span><strong>${item.label}</strong><small>${item.hint}</small></span><span class="check">✓</span>
-              </button>`).join("")}
-          </div>
         </section>
         <section class="palette-section hidden" id="prop-palette">
           <div class="section-label"><span>EDIT MODE</span><span id="prop-mode-label">배치</span></div>
@@ -203,6 +251,10 @@ document.querySelector<HTMLDivElement>("#app")!.innerHTML = `
         </section>
         <section class="palette-section hidden" id="image-palette">
           <div class="section-label"><span>IMAGE MATERIALS</span><span id="image-material-count"></span></div>
+          <div class="image-material-tabs" role="tablist" aria-label="이미지 재료 종류">
+            <button class="image-material-tab active" type="button" data-image-material-tab="default" role="tab" aria-selected="true">기본 제공</button>
+            <button class="image-material-tab" type="button" data-image-material-tab="mine" role="tab" aria-selected="false">나의 이미지</button>
+          </div>
           <p class="image-palette-message" id="image-palette-message">로그인하면 저장한 이미지를 재료로 사용할 수 있습니다.</p>
           <div class="image-material-grid" id="image-material-grid"></div>
           <div class="section-label"><span>EDIT MODE</span><span id="image-mode-label">배치</span></div>
@@ -212,6 +264,11 @@ document.querySelector<HTMLDivElement>("#app")!.innerHTML = `
             <button class="prop-mode" data-image-mode="erase" aria-pressed="false">지우기</button>
           </div>
           <p class="prop-mode-hint" id="image-mode-hint">이미지를 고른 뒤 맵을 클릭하면 배치합니다.</p>
+          <label class="image-continuous-toggle hidden" id="image-continuous-toggle">
+            <span class="toggle-copy"><strong>연속 배치</strong><small>드래그하면 지나가는 셀마다 배치합니다.</small></span>
+            <input id="image-continuous-placement" type="checkbox" role="switch" aria-label="연속 배치" />
+            <span class="toggle-track" aria-hidden="true"><span class="toggle-knob"></span></span>
+          </label>
         </section>
         <div class="tool-tip"><span>TIP</span> 사물은 배치·이동·지우개 모드로 편집합니다. 바닥 타일에서는 오른쪽 클릭으로 지울 수 있어요.</div>
       </aside>
@@ -248,8 +305,16 @@ document.querySelector<HTMLDivElement>("#app")!.innerHTML = `
           <div class="image-detail-preview"><img id="selected-image-preview" alt="" /><span id="selected-image-name"></span></div>
           <div class="image-transform-controls" aria-label="이미지 변환 설정">
             <div class="section-label"><span>TRANSFORM</span><span id="image-transform-summary">0° · 200%</span></div>
-            <label class="number-control" for="image-rotation"><span>회전</span><span class="number-input-wrap"><input id="image-rotation" type="number" min="0" max="345" step="15" value="0" /><b>°</b></span></label>
-            <label class="number-control" for="image-scale"><span>스케일</span><span class="number-input-wrap"><input id="image-scale" type="number" min="25" max="600" step="25" value="200" /><b>%</b></span></label>
+            <div class="transform-control">
+              <div class="transform-control-header"><label for="image-rotation">회전</label><output id="image-rotation-value">0°</output></div>
+              <div class="transform-number-row"><span class="number-input-wrap"><input id="image-rotation" type="number" min="0" max="345" step="15" value="0" /><b>°</b></span><button class="icon-button transform-reset-button" type="button" id="reset-image-rotation" title="회전 기본값 복원" aria-label="회전 기본값 복원"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 8V4m0 0h4M5 4a8 8 0 1 1-1.2 11.2" /></svg></button></div>
+              <input class="transform-range" id="image-rotation-slider" type="range" min="0" max="345" step="15" value="0" aria-label="회전 슬라이더" />
+            </div>
+            <div class="transform-control">
+              <div class="transform-control-header"><label for="image-scale">스케일</label><output id="image-scale-value">200%</output></div>
+              <div class="transform-number-row"><span class="number-input-wrap"><input id="image-scale" type="number" min="25" max="600" step="25" value="200" /><b>%</b></span><button class="icon-button transform-reset-button" type="button" id="reset-image-scale" title="스케일 기본값 복원" aria-label="스케일 기본값 복원"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 7V4h3M4 4l4 4m9 9h3v3m0 0-4-4M8 8h8v8H8z" /></svg></button></div>
+              <input class="transform-range" id="image-scale-slider" type="range" min="25" max="600" step="25" value="200" aria-label="스케일 슬라이더" />
+            </div>
             <button class="button ghost image-transform-reset" type="button" id="reset-image-transform">기본값 복원</button>
             <p class="image-detail-hint" id="image-detail-hint">회전 0° · 스케일 200%</p>
           </div>
@@ -357,6 +422,14 @@ function setupAuthUi(): void {
   accountSection.append(loginTrigger);
   fileMenu.prepend(accountSection);
 
+  const adminSection = document.createElement("div");
+  adminSection.className = "admin-menu-section hidden";
+  adminSection.id = "admin-menu-section";
+  adminSection.innerHTML = `
+    <span class="file-menu-heading">개발자 메뉴</span>
+    <button class="button export" id="open-admin-users" role="menuitem">사용자 관리</button>`;
+  fileMenu.prepend(adminSection);
+
   const authDialog = document.createElement("dialog");
   authDialog.id = "auth-dialog";
   authDialog.className = "auth-dialog";
@@ -373,6 +446,28 @@ function setupAuthUi(): void {
     </form>`;
   authDialog.querySelector<HTMLDivElement>(".auth-dialog-slot")!.append(authSlot);
   document.body.append(authDialog);
+
+  const adminDialog = document.createElement("dialog");
+  adminDialog.id = "admin-dialog";
+  adminDialog.className = "editor-dialog admin-dialog";
+  adminDialog.innerHTML = `
+    <form method="dialog">
+      <h2>사용자 관리</h2>
+      <p class="dialog-note">개발자 또는 관리자 권한으로 로그인한 사용자의 저장된 맵을 열람합니다.</p>
+      <p class="dialog-message" id="admin-message"></p>
+      <div class="admin-browser">
+        <section class="admin-users-pane" aria-label="사용자 목록">
+          <strong class="admin-pane-title">사용자 목록</strong>
+          <div id="admin-user-list" class="admin-user-list"></div>
+        </section>
+        <section class="admin-maps-pane" aria-label="선택한 사용자의 맵 목록">
+          <strong class="admin-pane-title" id="admin-maps-title">저장된 맵</strong>
+          <div id="admin-map-list" class="admin-map-list"><span class="empty-library">사용자를 선택하세요.</span></div>
+        </section>
+      </div>
+      <div class="dialog-actions"><button class="button ghost" value="cancel">닫기</button></div>
+    </form>`;
+  document.body.append(adminDialog);
 }
 setupAuthUi();
 
@@ -454,7 +549,14 @@ const waterBankPalettes: Record<GroundType, [number, number, number]> = {
 function drawWaterBankFace(column: number, row: number, ground: GroundType, direction: WaterBankDirection): void {
   const x = column * CELL_SIZE;
   const y = row * CELL_SIZE;
-  const thickness = CELL_SIZE * .25;
+  // The old all-sides bevel made the water look like a flat top-down overlay.
+  // Keep the side banks almost flush, show the strongest drop at 6 o'clock,
+  // and leave a thin ridge at 12 o'clock for the classic game look.
+  const thickness = direction === "S"
+    ? CELL_SIZE * .40
+    : direction === "N"
+      ? CELL_SIZE * .13
+      : CELL_SIZE * .07;
   const [r, g, b] = waterBankPalettes[ground];
   const soil = `rgb(${r}, ${g}, ${b})`;
   const dark = `rgb(${Math.round(r * .58)}, ${Math.round(g * .58)}, ${Math.round(b * .58)})`;
@@ -489,6 +591,24 @@ function drawWaterBankFace(column: number, row: number, ground: GroundType, dire
   context.strokeStyle = dark;
   context.lineWidth = 1;
   context.beginPath();
+  if (direction === "N" || direction === "S") {
+    const lineY = direction === "N" ? y + thickness : y + CELL_SIZE - thickness;
+    context.moveTo(x, lineY); context.lineTo(x + CELL_SIZE, lineY);
+  } else {
+    const lineX = direction === "W" ? x + thickness : x + CELL_SIZE - thickness;
+    context.moveTo(lineX, y); context.lineTo(lineX, y + CELL_SIZE);
+  }
+  context.stroke();
+  context.restore();
+}
+function drawWaterBank(column: number, row: number, ground: GroundType, mask: number): void {
+  const faces: Array<[number, WaterBankDirection]> = [
+    [NEIGHBOR_MASK.N, "N"], [NEIGHBOR_MASK.E, "E"], [NEIGHBOR_MASK.S, "S"], [NEIGHBOR_MASK.W, "W"],
+  ];
+  for (const [bit, direction] of faces) {
+    if (mask & bit) drawWaterBankFace(column, row, ground, direction);
+  }
+}
 const raisedTileSidePalettes: Record<GroundType, [number, number, number]> = {
   grass: [74, 50, 30], dirt: [91, 58, 34], stone: [73, 74, 66], water: [35, 84, 91],
 };
@@ -527,24 +647,6 @@ function drawRaisedTile(column: number, row: number, ground: GroundType): void {
   const east = column + 1 < map.columns ? map.cells[cellIndex(map, column + 1, row)] : null;
   if (!south || south.elevation < current.elevation) drawRaisedTileFace(column, row, ground, "S");
   if (!east || east.elevation < current.elevation) drawRaisedTileFace(column, row, ground, "E");
-}
-  if (direction === "N" || direction === "S") {
-    const lineY = direction === "N" ? y + 1 : y + CELL_SIZE - 1;
-    context.moveTo(x, lineY); context.lineTo(x + CELL_SIZE, lineY);
-  } else {
-    const lineX = direction === "W" ? x + 1 : x + CELL_SIZE - 1;
-    context.moveTo(lineX, y); context.lineTo(lineX, y + CELL_SIZE);
-  }
-  context.stroke();
-  context.restore();
-}
-function drawWaterBank(column: number, row: number, ground: GroundType, mask: number): void {
-  const faces: Array<[number, WaterBankDirection]> = [
-    [NEIGHBOR_MASK.N, "N"], [NEIGHBOR_MASK.E, "E"], [NEIGHBOR_MASK.S, "S"], [NEIGHBOR_MASK.W, "W"],
-  ];
-  for (const [bit, direction] of faces) {
-    if (mask & bit) drawWaterBankFace(column, row, ground, direction);
-  }
 }
 function createTransitionPath(column: number, row: number, mask: number): Path2D {
   const x = column * CELL_SIZE;
@@ -586,9 +688,26 @@ function drawProp(column: number, row: number, prop: PropType, opacity = 1): voi
   }
   context.save();
   context.globalAlpha = opacity;
-  context.drawImage(image, column * CELL_SIZE + CELL_SIZE / 2 - size / 2, row * CELL_SIZE + CELL_SIZE - size * 0.78, size, size);
+  const centerY = row * CELL_SIZE + CELL_SIZE / 2;
+  const imageY = prop === "shrub" ? centerY - size / 2 : row * CELL_SIZE + CELL_SIZE - size * 0.78;
+  context.drawImage(image, column * CELL_SIZE + CELL_SIZE / 2 - size / 2, imageY, size, size);
   context.restore();
 }
+function createBridgeArmPath(column: number, row: number, direction: BridgeDirection): Path2D {
+  const x = column * CELL_SIZE;
+  const y = row * CELL_SIZE;
+  const centerX = x + CELL_SIZE / 2;
+  const centerY = y + CELL_SIZE / 2;
+  const halfLane = CELL_SIZE * .28;
+  const path = new Path2D();
+  path.rect(centerX - halfLane, centerY - halfLane, halfLane * 2, halfLane * 2);
+  if (direction === "N") path.rect(centerX - halfLane, y, halfLane * 2, CELL_SIZE / 2);
+  if (direction === "E") path.rect(centerX, centerY - halfLane, CELL_SIZE / 2, halfLane * 2);
+  if (direction === "S") path.rect(centerX - halfLane, centerY, halfLane * 2, CELL_SIZE / 2);
+  if (direction === "W") path.rect(x, centerY - halfLane, CELL_SIZE / 2, halfLane * 2);
+  return path;
+}
+
 function createBridgeConnectionPath(column: number, row: number, mask: number): Path2D {
   const x = column * CELL_SIZE;
   const y = row * CELL_SIZE;
@@ -600,34 +719,120 @@ function createBridgeConnectionPath(column: number, row: number, mask: number): 
     path.rect(x, y, CELL_SIZE, CELL_SIZE);
     return path;
   }
-  if (mask === 0) {
-    path.rect(centerX - halfLane, centerY - halfLane, halfLane * 2, halfLane * 2);
-    return path;
-  }
   path.rect(centerX - halfLane, centerY - halfLane, halfLane * 2, halfLane * 2);
-  if (mask & NEIGHBOR_MASK.N) path.rect(centerX - halfLane, y, halfLane * 2, CELL_SIZE / 2);
-  if (mask & NEIGHBOR_MASK.E) path.rect(centerX, centerY - halfLane, CELL_SIZE / 2, halfLane * 2);
-  if (mask & NEIGHBOR_MASK.S) path.rect(centerX - halfLane, centerY, halfLane * 2, CELL_SIZE / 2);
-  if (mask & NEIGHBOR_MASK.W) path.rect(x, centerY - halfLane, CELL_SIZE / 2, halfLane * 2);
-  if (mask & NEIGHBOR_MASK.NE) path.rect(centerX, y, CELL_SIZE / 2, CELL_SIZE / 2);
-  if (mask & NEIGHBOR_MASK.SE) path.rect(centerX, centerY, CELL_SIZE / 2, CELL_SIZE / 2);
-  if (mask & NEIGHBOR_MASK.SW) path.rect(x, centerY, CELL_SIZE / 2, CELL_SIZE / 2);
-  if (mask & NEIGHBOR_MASK.NW) path.rect(x, y, CELL_SIZE / 2, CELL_SIZE / 2);
+  for (const direction of getBridgeConnectionDirections(mask)) {
+    if (direction === "N") path.rect(centerX - halfLane, y, halfLane * 2, CELL_SIZE / 2);
+    if (direction === "E") path.rect(centerX, centerY - halfLane, CELL_SIZE / 2, halfLane * 2);
+    if (direction === "S") path.rect(centerX - halfLane, centerY, halfLane * 2, CELL_SIZE / 2);
+    if (direction === "W") path.rect(x, centerY - halfLane, CELL_SIZE / 2, halfLane * 2);
+  }
+  const normalizedMask = mask & (NEIGHBOR_MASK.N | NEIGHBOR_MASK.E | NEIGHBOR_MASK.S | NEIGHBOR_MASK.W | NEIGHBOR_MASK.NE | NEIGHBOR_MASK.SE | NEIGHBOR_MASK.SW | NEIGHBOR_MASK.NW);
+  if (normalizedMask & NEIGHBOR_MASK.NE) path.rect(centerX, y, CELL_SIZE / 2, CELL_SIZE / 2);
+  if (normalizedMask & NEIGHBOR_MASK.SE) path.rect(centerX, centerY, CELL_SIZE / 2, CELL_SIZE / 2);
+  if (normalizedMask & NEIGHBOR_MASK.SW) path.rect(x, centerY, CELL_SIZE / 2, CELL_SIZE / 2);
+  if (normalizedMask & NEIGHBOR_MASK.NW) path.rect(x, y, CELL_SIZE / 2, CELL_SIZE / 2);
   return path;
 }
-function drawFootbridge(column: number, row: number, image: HTMLImageElement, size: number, opacity: number): void {
-  const mask = getPropNeighborMask(map, column, row, "footbridge");
-  const shape = getBridgeConnectionShape(mask);
+
+function createBridgeDiagonalJoinPath(column: number, row: number, mask: number): Path2D | null {
+  const x = column * CELL_SIZE;
+  const y = row * CELL_SIZE;
+  const centerX = x + CELL_SIZE / 2;
+  const centerY = y + CELL_SIZE / 2;
+  const path = new Path2D();
+  let hasJoin = false;
+  if (mask & NEIGHBOR_MASK.NE) { path.rect(centerX, y, CELL_SIZE / 2, CELL_SIZE / 2); hasJoin = true; }
+  if (mask & NEIGHBOR_MASK.SE) { path.rect(centerX, centerY, CELL_SIZE / 2, CELL_SIZE / 2); hasJoin = true; }
+  if (mask & NEIGHBOR_MASK.SW) { path.rect(x, centerY, CELL_SIZE / 2, CELL_SIZE / 2); hasJoin = true; }
+  if (mask & NEIGHBOR_MASK.NW) { path.rect(x, y, CELL_SIZE / 2, CELL_SIZE / 2); hasJoin = true; }
+  return hasJoin ? path : null;
+}
+
+function drawBridgeTexturePass(
+  column: number,
+  row: number,
+  image: HTMLImageElement,
+  size: number,
+  opacity: number,
+  direction: BridgeDirection | null,
+  clipPath?: Path2D,
+): void {
   const centerX = column * CELL_SIZE + CELL_SIZE / 2;
   const centerY = row * CELL_SIZE + CELL_SIZE - size * .78 + size / 2;
-  const rotation = getBridgeTextureRotation(shape) * Math.PI / 180;
+  const rotation = direction === "E" || direction === "W" ? Math.PI / 2 : 0;
   context.save();
   context.globalAlpha = opacity;
-  if (shape !== "isolated" && shape !== "full") context.clip(createBridgeConnectionPath(column, row, mask));
+  if (clipPath) context.clip(clipPath);
   context.translate(centerX, centerY);
   context.rotate(rotation);
   context.drawImage(image, -size / 2, -size / 2, size, size);
   context.restore();
+}
+
+function drawBridgeEndCap(column: number, row: number, direction: BridgeDirection, opacity: number): void {
+  const x = column * CELL_SIZE;
+  const y = row * CELL_SIZE;
+  const inset = CELL_SIZE * .19;
+  const laneWidth = CELL_SIZE - inset * 2;
+  const depth = Math.max(3, CELL_SIZE * .13);
+  const edge = direction === "N" || direction === "W" ? 1 : CELL_SIZE - depth - 1;
+  context.save();
+  context.globalAlpha = opacity;
+  context.fillStyle = "rgba(38, 27, 18, .34)";
+  if (direction === "N" || direction === "S") {
+    context.fillRect(x + inset + 1, y + edge + 2, laneWidth, depth);
+  } else {
+    context.fillRect(x + edge + 2, y + inset + 1, depth, laneWidth);
+  }
+  context.fillStyle = "#70462c";
+  context.strokeStyle = "#d19a5e";
+  context.lineWidth = 1;
+  if (direction === "N" || direction === "S") {
+    context.fillRect(x + inset, y + edge, laneWidth, depth);
+    context.strokeRect(x + inset + .5, y + edge + .5, laneWidth - 1, depth - 1);
+    context.strokeStyle = "rgba(48, 29, 18, .75)";
+    context.beginPath();
+    context.moveTo(x + inset + 2, y + edge + depth * .52);
+    context.lineTo(x + CELL_SIZE - inset - 2, y + edge + depth * .52);
+    context.stroke();
+  } else {
+    context.fillRect(x + edge, y + inset, depth, laneWidth);
+    context.strokeRect(x + edge + .5, y + inset + .5, depth - 1, laneWidth - 1);
+    context.strokeStyle = "rgba(48, 29, 18, .75)";
+    context.beginPath();
+    context.moveTo(x + edge + depth * .52, y + inset + 2);
+    context.lineTo(x + edge + depth * .52, y + CELL_SIZE - inset - 2);
+    context.stroke();
+  }
+  context.restore();
+}
+
+function drawFootbridge(column: number, row: number, image: HTMLImageElement, size: number, opacity: number): void {
+  const mask = getPropNeighborMask(map, column, row, "footbridge");
+  const shape = getBridgeConnectionShape(mask);
+  const directions = getBridgeConnectionDirections(mask);
+  if (shape === "isolated" || shape === "full") {
+    drawBridgeTexturePass(column, row, image, size, opacity, getBridgeTextureRotation(shape) === 90 ? "E" : "N");
+  } else if (directions.length === 1 || shape === "horizontal" || shape === "vertical") {
+    const direction = shape === "horizontal" ? "E" : shape === "vertical" ? "N" : directions[0];
+    drawBridgeTexturePass(column, row, image, size, opacity, direction, createBridgeConnectionPath(column, row, mask));
+  } else {
+    for (const direction of directions) {
+      drawBridgeTexturePass(column, row, image, size, opacity, direction, createBridgeArmPath(column, row, direction));
+    }
+    const diagonalJoinPath = createBridgeDiagonalJoinPath(column, row, mask);
+    if (diagonalJoinPath) drawBridgeTexturePass(column, row, image, size, opacity, "N", diagonalJoinPath);
+  }
+
+  const endpointMask = getBridgeEndpointMask(mask);
+  for (const [direction, bit] of [
+    ["N", NEIGHBOR_MASK.N],
+    ["E", NEIGHBOR_MASK.E],
+    ["S", NEIGHBOR_MASK.S],
+    ["W", NEIGHBOR_MASK.W],
+  ] as const) {
+    if ((endpointMask & bit) !== 0) drawBridgeEndCap(column, row, direction, opacity);
+  }
 }
 function drawImagePlacement(placement: MapImagePlacement, opacity = 1, selected = false): void {
   const image = imageRenderImages.get(placement.imageId);
@@ -637,9 +842,6 @@ function drawImagePlacement(placement: MapImagePlacement, opacity = 1, selected 
   const centerX = placement.column * CELL_SIZE + CELL_SIZE / 2;
   const centerY = placement.row * CELL_SIZE + CELL_SIZE / 2;
   context.save();
-  for (let row = 0; row < map.rows; row += 1) for (let column = 0; column < map.columns; column += 1) {
-    drawRaisedTile(column, row, map.cells[cellIndex(map, column, row)].ground);
-  }
   context.globalAlpha = opacity;
   context.translate(centerX, centerY);
   context.rotate(placement.rotation * Math.PI / 180);
@@ -657,6 +859,9 @@ function render(): void {
   context.clearRect(0, 0, canvas.width, canvas.height);
   for (let row = 0; row < map.rows; row += 1) for (let column = 0; column < map.columns; column += 1) {
     drawGround(column, row, map.cells[cellIndex(map, column, row)].ground);
+  }
+  for (let row = 0; row < map.rows; row += 1) for (let column = 0; column < map.columns; column += 1) {
+    drawRaisedTile(column, row, map.cells[cellIndex(map, column, row)].ground);
   }
   for (let row = 0; row < map.rows; row += 1) for (let column = 0; column < map.columns; column += 1) {
     const prop = map.cells[cellIndex(map, column, row)].prop;
@@ -764,6 +969,8 @@ function selectImagePlacement(index: number): void {
   render();
 }
 function paintAt(event: PointerEvent): void {
+  if (selectedLayer === "image" && imageMode === "place" && !imageContinuousPlacement
+    && (!isDrawing || event.type === "pointermove")) return;
   const cell = getCell(event);
   const key = cell ? `${cell.column}:${cell.row}` : "outside";
   if (key === lastPaintedCell) return;
@@ -1004,6 +1211,189 @@ async function openMapLibrary(): Promise<void> {
     setDialogMessage("#map-library-message", error instanceof Error ? error.message : "지도 목록을 불러오지 못했습니다.", "error");
   }
 }
+
+let adminSelectedUserId: string | null = null;
+
+function setAdminMenuVisible(visible: boolean): void {
+  adminAccess = visible;
+  document.querySelector<HTMLElement>("#admin-menu-section")?.classList.toggle("hidden", !visible);
+}
+
+function renderAdminUserList(users: readonly AdminUser[]): void {
+  const list = document.querySelector<HTMLDivElement>("#admin-user-list");
+  if (!list) return;
+  list.replaceChildren();
+  if (users.length === 0) {
+    const empty = document.createElement("div");
+    empty.className = "empty-library";
+    empty.textContent = "등록된 사용자가 없습니다.";
+    list.append(empty);
+    return;
+  }
+  for (const user of users) {
+    const row = document.createElement("div");
+    row.className = "admin-user-item";
+    row.dataset.userId = user.id;
+    row.classList.toggle("selected", adminSelectedUserId === user.id);
+    const select = document.createElement("button");
+    select.type = "button";
+    select.className = "admin-user-select";
+    select.innerHTML = `<strong></strong><small></small>`;
+    select.querySelector("strong")!.textContent = user.displayName;
+    select.querySelector("small")!.textContent = user.email;
+    select.addEventListener("click", () => { void loadAdminUserMaps(user); });
+    row.append(select);
+    if (!user.isAdmin) {
+      const promote = document.createElement("button");
+      promote.type = "button";
+      promote.className = "button export admin-promote";
+      promote.textContent = "관리자 등록";
+      promote.addEventListener("click", () => { void promoteAdminUser(user); });
+      row.append(promote);
+    } else {
+      const badge = document.createElement("span");
+      badge.className = "admin-badge";
+      badge.textContent = "관리자";
+      row.append(badge);
+    }
+    list.append(row);
+  }
+}
+
+function renderAdminMapList(user: AdminUser, maps: readonly AdminMapSummary[]): void {
+  const title = document.querySelector<HTMLElement>("#admin-maps-title");
+  const list = document.querySelector<HTMLDivElement>("#admin-map-list");
+  if (!list) return;
+  if (title) title.textContent = `${user.displayName}의 저장된 맵`;
+  list.replaceChildren();
+  if (maps.length === 0) {
+    const empty = document.createElement("div");
+    empty.className = "empty-library";
+    empty.textContent = "저장된 맵이 없습니다.";
+    list.append(empty);
+    return;
+  }
+  for (const item of maps) {
+    const row = document.createElement("div");
+    row.className = "admin-map-item";
+    const detail = document.createElement("div");
+    const name = document.createElement("strong");
+    name.textContent = item.name;
+    const date = document.createElement("small");
+    date.textContent = item.updatedAt ?? item.createdAt ?? "";
+    detail.append(name, date);
+    const load = document.createElement("button");
+    load.type = "button";
+    load.className = "button export";
+    load.textContent = "맵 열기";
+    load.addEventListener("click", () => { void loadAdminMap(user.id, item.id, load); });
+    row.append(detail, load);
+    list.append(row);
+  }
+}
+
+async function loadAdminUserMaps(user: AdminUser): Promise<void> {
+  if (!adminClient) return;
+  adminSelectedUserId = user.id;
+  document.querySelectorAll<HTMLElement>(".admin-user-item").forEach((item) => item.classList.remove("selected"));
+  document.querySelector<HTMLElement>(`.admin-user-item[data-user-id="${CSS.escape(user.id)}"]`)?.classList.add("selected");
+  const message = document.querySelector("#admin-message");
+  const list = document.querySelector<HTMLDivElement>("#admin-map-list");
+  if (message) message.textContent = "사용자의 맵 목록을 불러오는 중입니다.";
+  if (list) list.replaceChildren();
+  try {
+    const maps = await adminClient.listMaps(user.id, authSession?.token);
+    renderAdminMapList(user, maps);
+    if (message) message.textContent = maps.length ? "맵을 선택하면 현재 편집 화면에서 열립니다." : "";
+  } catch (error) {
+    if (message) message.textContent = error instanceof Error ? error.message : "맵 목록을 불러오지 못했습니다.";
+    if (message) message.classList.add("is-error");
+  }
+}
+
+async function promoteAdminUser(user: AdminUser): Promise<void> {
+  if (!adminClient) return;
+  const message = document.querySelector("#admin-message");
+  if (message) {
+    message.classList.remove("is-error", "is-success");
+    message.textContent = `${user.displayName}을(를) 관리자로 등록하는 중입니다.`;
+  }
+  try {
+    await adminClient.promoteUser(user.id, authSession?.token);
+    if (message) {
+      message.classList.add("is-success");
+      message.textContent = "관리자 등록이 완료됐습니다.";
+    }
+    await openAdminUsers(false);
+  } catch (error) {
+    if (message) {
+      message.classList.add("is-error");
+      message.textContent = error instanceof Error ? error.message : "관리자 등록에 실패했습니다.";
+    }
+  }
+}
+
+async function openAdminUsers(closeMenu = true): Promise<void> {
+  if (closeMenu) setFileMenuOpen(false);
+  const dialog = document.querySelector<HTMLDialogElement>("#admin-dialog");
+  const message = document.querySelector<HTMLElement>("#admin-message");
+  if (!dialog || !adminClient) return;
+  adminSelectedUserId = null;
+  if (message) {
+    message.className = "dialog-message";
+    message.textContent = "사용자 목록을 불러오는 중입니다.";
+  }
+  document.querySelector("#admin-maps-title")!.textContent = "저장된 맵";
+  document.querySelector<HTMLDivElement>("#admin-map-list")!.innerHTML = "<span class=\"empty-library\">사용자를 선택하세요.</span>";
+  if (!dialog.open) dialog.showModal();
+  try {
+    const users = await adminClient.listUsers(authSession?.token);
+    renderAdminUserList(users);
+    if (message) message.textContent = users.length ? "사용자를 선택하면 저장된 맵을 확인할 수 있습니다." : "";
+  } catch (error) {
+    if (message) {
+      message.classList.add("is-error");
+      message.textContent = error instanceof Error ? error.message : "사용자 목록을 불러오지 못했습니다.";
+    }
+  }
+}
+
+async function loadAdminMap(userId: string, mapId: string, button: HTMLButtonElement): Promise<void> {
+  if (!adminClient) return;
+  button.disabled = true;
+  const message = document.querySelector("#admin-message");
+  if (message) message.textContent = "맵을 불러오는 중입니다.";
+  try {
+    const saved = await adminClient.loadMap(userId, mapId, authSession?.token);
+    const payload = typeof saved.payload === "string" ? saved.payload : JSON.stringify(saved.payload);
+    const loaded = deserializeMap(payload);
+    if (!loaded) throw new Error("저장된 맵 데이터가 올바르지 않습니다.");
+    savedMapId = null;
+    replaceMap(loaded);
+    document.querySelector<HTMLDialogElement>("#admin-dialog")?.close();
+  } catch (error) {
+    if (message) {
+      message.classList.add("is-error");
+      message.textContent = error instanceof Error ? error.message : "맵을 불러오지 못했습니다.";
+    }
+  } finally {
+    button.disabled = false;
+  }
+}
+
+async function refreshAdminAccess(): Promise<void> {
+  if (!adminClient) {
+    setAdminMenuVisible(false);
+    return;
+  }
+  try {
+    await adminClient.listUsers(authSession?.token);
+    setAdminMenuVisible(true);
+  } catch {
+    setAdminMenuVisible(false);
+  }
+}
+
 function renderImageLibrary(items: readonly ImageAsset[]): void {
   const list = document.querySelector<HTMLDivElement>("#image-library-list")!;
   const count = document.querySelector<HTMLSpanElement>("#image-page-count");
@@ -1091,7 +1481,8 @@ function setImagePaletteMessage(message: string, kind: "error" | "" = ""): void 
   target.classList.toggle("is-error", kind === "error");
 }
 function cacheImageForMap(asset: ImageAsset): void {
-  imageAssetsById.set(asset.id, asset);
+  if (asset.id.startsWith("builtin:")) defaultImageAssetsById.set(asset.id, asset);
+  else imageAssetsById.set(asset.id, asset);
   if (imageRenderImages.has(asset.id)) return;
   const image = new Image();
   image.crossOrigin = "anonymous";
@@ -1107,6 +1498,10 @@ function cacheImageForMap(asset: ImageAsset): void {
   }, { once: true });
   imageRenderImages.set(asset.id, image);
 }
+function findImageAsset(imageId: string | null | undefined): ImageAsset | undefined {
+  if (!imageId) return undefined;
+  return imageAssetsById.get(imageId) ?? defaultImageAssetsById.get(imageId);
+}
 function renderImageDetails(): void {
   const empty = document.querySelector<HTMLDivElement>("#image-detail-empty");
   const content = document.querySelector<HTMLElement>("#image-detail-content");
@@ -1119,7 +1514,7 @@ function renderImageDetails(): void {
 
   const placement = selectedImagePlacementIndex === null ? null : map.images[selectedImagePlacementIndex];
   const imageId = placement?.imageId ?? selectedImageId;
-  const asset = imageId ? imageAssetsById.get(imageId) : undefined;
+  const asset = findImageAsset(imageId);
   const hasContext = selectedLayer === "image" && Boolean(imageId);
   empty.classList.toggle("hidden", hasContext);
   content.classList.toggle("hidden", !hasContext);
@@ -1147,32 +1542,85 @@ function renderImageDetails(): void {
 function syncImageTransformControls(): void {
   const rotation = document.querySelector<HTMLInputElement>("#image-rotation");
   const scale = document.querySelector<HTMLInputElement>("#image-scale");
+  const rotationSlider = document.querySelector<HTMLInputElement>("#image-rotation-slider");
+  const scaleSlider = document.querySelector<HTMLInputElement>("#image-scale-slider");
   const rotationValue = document.querySelector<HTMLOutputElement>("#image-rotation-value");
   const scaleValue = document.querySelector<HTMLOutputElement>("#image-scale-value");
   const summary = document.querySelector<HTMLSpanElement>("#image-transform-summary");
-  if (!rotation || !scale || !rotationValue || !scaleValue || !summary) return;
+  if (!rotation || !scale || !rotationSlider || !scaleSlider || !rotationValue || !scaleValue || !summary) return;
   const rotationText = `${Math.round(selectedImageRotation)}°`;
   const scaleText = `${Math.round(selectedImageScale * 100)}%`;
   rotation.value = String(Math.round(selectedImageRotation));
   scale.value = String(Math.round(selectedImageScale * 100));
+  rotationSlider.value = String(Math.round(selectedImageRotation));
+  scaleSlider.value = String(Math.round(selectedImageScale * 100));
   rotationValue.value = rotationText;
   scaleValue.value = scaleText;
   summary.textContent = `${rotationText} · ${scaleText}`;
   const disabled = !selectedImageId && selectedImagePlacementIndex === null;
   rotation.disabled = disabled;
   scale.disabled = disabled;
+  rotationSlider.disabled = disabled;
+  scaleSlider.disabled = disabled;
   const reset = document.querySelector<HTMLButtonElement>("#reset-image-transform");
   if (reset) reset.disabled = disabled;
+  document.querySelectorAll<HTMLButtonElement>(".transform-reset-button").forEach((button) => { button.disabled = disabled; });
   renderImageDetails();
+}
+function renderImageMaterialTabs(): void {
+  document.querySelectorAll<HTMLButtonElement>("[data-image-material-tab]").forEach((button) => {
+    const active = button.dataset.imageMaterialTab === imageMaterialTab;
+    button.classList.toggle("active", active);
+    button.setAttribute("aria-selected", String(active));
+  });
+}
+function createImageMaterialOption(asset: ImageAsset): HTMLButtonElement {
+  const button = document.createElement("button");
+  button.type = "button";
+  button.className = "image-material-option";
+  button.dataset.imageId = asset.id;
+  button.title = asset.originalFilename;
+  button.classList.toggle("selected", selectedImageId === asset.id);
+  button.setAttribute("aria-pressed", String(selectedImageId === asset.id));
+  const image = document.createElement("img");
+  image.src = asset.thumbnailUrl;
+  image.alt = asset.originalFilename;
+  image.loading = "lazy";
+  image.referrerPolicy = "no-referrer";
+  const label = document.createElement("span");
+  label.textContent = asset.originalFilename;
+  button.append(image, label);
+  button.addEventListener("click", () => {
+    cacheImageForMap(asset);
+    selectedImageId = asset.id;
+    selectedImagePlacementIndex = null;
+    setImageMode("place");
+    renderImageMaterials();
+    syncImageTransformControls();
+  });
+  return button;
 }
 function renderImageMaterials(): void {
   const grid = document.querySelector<HTMLDivElement>("#image-material-grid");
   const count = document.querySelector<HTMLSpanElement>("#image-material-count");
   if (!grid || !count) return;
+  renderImageMaterialTabs();
   grid.replaceChildren();
+
+  if (imageMaterialTab === "default") {
+    count.textContent = `${defaultImageAssets.length}개`;
+    setImagePaletteMessage("숲에 어울리는 투명 이미지를 기본으로 제공합니다.");
+    for (const asset of defaultImageAssets) {
+      cacheImageForMap(asset);
+      grid.append(createImageMaterialOption(asset));
+    }
+    syncImageTransformControls();
+    return;
+  }
+
   count.textContent = imageAssets.length ? `${imageAssets.length}개` : "";
   if (!authSession || !imageLibraryClient) {
-    setImagePaletteMessage("로그인하면 저장한 이미지를 재료로 사용할 수 있습니다.");
+    setImagePaletteMessage("나의 이미지를 보려면 로그인이 필요합니다.", "error");
     syncImageTransformControls();
     return;
   }
@@ -1187,31 +1635,7 @@ function renderImageMaterials(): void {
     return;
   }
   setImagePaletteMessage(selectedImageId ? "이미지를 고른 뒤 맵을 클릭하면 배치합니다." : "배치할 이미지를 선택해 주세요.");
-  for (const asset of imageAssets) {
-    const button = document.createElement("button");
-    button.type = "button";
-    button.className = "image-material-option";
-    button.dataset.imageId = asset.id;
-    button.title = asset.originalFilename;
-    button.classList.toggle("selected", selectedImageId === asset.id);
-    button.setAttribute("aria-pressed", String(selectedImageId === asset.id));
-    const image = document.createElement("img");
-    image.src = asset.thumbnailUrl;
-    image.alt = asset.originalFilename;
-    image.loading = "lazy";
-    image.referrerPolicy = "no-referrer";
-    const label = document.createElement("span");
-    label.textContent = asset.originalFilename;
-    button.append(image, label);
-    button.addEventListener("click", () => {
-      selectedImageId = asset.id;
-      selectedImagePlacementIndex = null;
-      setImageMode("place");
-      renderImageMaterials();
-      syncImageTransformControls();
-    });
-    grid.append(button);
-  }
+  for (const asset of imageAssets) grid.append(createImageMaterialOption(asset));
   syncImageTransformControls();
 }
 async function refreshImageMaterials(): Promise<void> {
@@ -1715,6 +2139,9 @@ async function handleGoogleCredential(response: GoogleCredentialResponse): Promi
   try {
     saveAuthSession(await authClient.login(response.credential));
     renderProfile();
+    void refreshAdminAccess();
+    imageMaterialTab = "mine";
+    renderImageMaterials();
     void refreshImageMaterials();
     document.querySelector<HTMLDialogElement>("#auth-dialog")?.close();
   } catch (error) {
@@ -1764,6 +2191,7 @@ async function initializeAuth(): Promise<void> {
       return;
     }
     authClient = new AuthClient(config.apiBaseUrl);
+    adminClient = new AdminClient(config.apiBaseUrl);
     imageLibraryClient = new ImageLibraryClient(config.apiBaseUrl);
     mapStorageClient = new MapStorageClient(config.apiBaseUrl);
     googleClientId = config.googleClientId;
@@ -1774,6 +2202,9 @@ async function initializeAuth(): Promise<void> {
         const verified = await authClient.me(restored.token);
         saveAuthSession({ token: restored.token, profile: verified.profile });
         renderProfile();
+        void refreshAdminAccess();
+        imageMaterialTab = "mine";
+        renderImageMaterials();
         void refreshImageMaterials();
         return;
       } catch {
@@ -1781,6 +2212,7 @@ async function initializeAuth(): Promise<void> {
       }
     }
     renderLoggedOut();
+    void refreshAdminAccess();
   } catch (error) {
     console.error("Authentication setup failed", error);
     renderAuthRetry("로그인 서버 다시 연결", () => { void initializeAuth(); });
@@ -1803,6 +2235,7 @@ async function initializeDeploymentTime(): Promise<void> {
 async function initializeDeveloperAccess(apiBaseUrl: string): Promise<void> {
   const target = document.querySelector<HTMLButtonElement>("#developer-access");
   if (!target) return;
+  developerAccess = false;
   target.disabled = true;
   target.onclick = () => {
     if (!target.disabled) window.location.assign("/diag/");
@@ -1819,8 +2252,10 @@ async function initializeDeveloperAccess(apiBaseUrl: string): Promise<void> {
       target.textContent = "Developer: old API";
       target.classList.add("is-old");
       target.title = "The deployed Worker does not expose developer access status.";
+      void refreshAdminAccess();
       return;
     }
+    developerAccess = body.developerDebug;
     target.textContent = body.developerDebug ? "Developer: yes" : "Developer: no";
     target.classList.add(body.developerDebug ? "is-on" : "is-off");
     target.disabled = !body.developerDebug;
@@ -1828,31 +2263,16 @@ async function initializeDeveloperAccess(apiBaseUrl: string): Promise<void> {
     target.title = body.developerDebug
       ? "This browser IP is allowlisted for developer diagnostics."
       : "This browser IP is not allowlisted for developer diagnostics.";
+    void refreshAdminAccess();
   } catch {
+    developerAccess = false;
     target.textContent = "Developer: unavailable";
     target.classList.remove("is-on", "is-off", "is-old");
     target.classList.add("is-unavailable");
     target.classList.remove("is-link");
     target.disabled = true;
-function setGroundEditTab(tab: GroundEditTab): void {
-  selectedGroundEditTab = tab;
-  document.querySelectorAll<HTMLButtonElement>("[data-ground-edit-tab]").forEach((button) => {
-    const active = button.dataset.groundEditTab === tab;
-    button.classList.toggle("active", active);
-    button.setAttribute("aria-selected", String(active));
-  });
-  document.querySelector("#terrain-palette")?.classList.toggle("hidden", tab !== "terrain");
-  document.querySelector("#elevation-palette")?.classList.toggle("hidden", tab !== "elevation");
-}
-function setTileElevationOption(elevation: TileElevation): void {
-  selectedTileElevation = elevation;
-  document.querySelectorAll<HTMLButtonElement>("[data-tile-elevation]").forEach((button) => {
-    const active = Number(button.dataset.tileElevation) === elevation;
-    button.classList.toggle("selected", active);
-    button.setAttribute("aria-checked", String(active));
-  });
-}
     target.title = "The Worker health check could not be completed.";
+    void refreshAdminAccess();
   }
 }
 
@@ -1873,6 +2293,24 @@ function setPropMode(mode: PropMode): void {
   canvas.classList.remove("prop-mode-place", "prop-mode-move", "prop-mode-erase");
   canvas.classList.add(`prop-mode-${mode}`);
 }
+function setGroundEditTab(tab: GroundEditTab): void {
+  selectedGroundEditTab = tab;
+  document.querySelectorAll<HTMLButtonElement>("[data-ground-edit-tab]").forEach((button) => {
+    const active = button.dataset.groundEditTab === tab;
+    button.classList.toggle("active", active);
+    button.setAttribute("aria-selected", String(active));
+  });
+  document.querySelector("#terrain-palette")?.classList.toggle("hidden", tab !== "terrain");
+  document.querySelector("#elevation-palette")?.classList.toggle("hidden", tab !== "elevation");
+}
+function setTileElevationOption(elevation: TileElevation): void {
+  selectedTileElevation = elevation;
+  document.querySelectorAll<HTMLButtonElement>("[data-tile-elevation]").forEach((button) => {
+    const active = Number(button.dataset.tileElevation) === elevation;
+    button.classList.toggle("selected", active);
+    button.setAttribute("aria-checked", String(active));
+  });
+}
 const imageModeCopy: Record<PropMode, { label: string; hint: string }> = {
   place: { label: "배치", hint: "이미지를 고른 뒤 맵을 클릭하면 배치합니다." },
   move: { label: "이동", hint: "맵의 이미지를 클릭한 뒤 다른 칸으로 끌어 이동합니다." },
@@ -1888,8 +2326,11 @@ function setImageMode(mode: PropMode): void {
   });
   const label = document.querySelector("#image-mode-label");
   const hint = document.querySelector("#image-mode-hint");
+  const continuousToggle = document.querySelector<HTMLLabelElement>("#image-continuous-toggle");
   if (label) label.textContent = imageModeCopy[mode].label;
   if (hint) hint.textContent = imageModeCopy[mode].hint;
+  continuousToggle?.classList.toggle("hidden", mode !== "place");
+  continuousToggle?.setAttribute("aria-hidden", String(mode !== "place"));
   canvas.classList.remove("image-mode-place", "image-mode-move", "image-mode-erase");
   canvas.classList.add(`image-mode-${mode}`);
   render();
@@ -1968,12 +2409,6 @@ canvas.addEventListener("pointercancel", (event) => {
   if (canvas.hasPointerCapture(event.pointerId)) canvas.releasePointerCapture(event.pointerId);
 });
 canvas.addEventListener("contextmenu", (event) => event.preventDefault());
-document.querySelectorAll<HTMLButtonElement>("[data-ground-edit-tab]").forEach((button) => button.addEventListener("click", () => {
-  setGroundEditTab(button.dataset.groundEditTab as GroundEditTab);
-}));
-document.querySelectorAll<HTMLButtonElement>("[data-tile-elevation]").forEach((button) => button.addEventListener("click", () => {
-  setTileElevationOption(Number(button.dataset.tileElevation) as TileElevation);
-}));
 canvas.addEventListener("pointerleave", () => { document.querySelector("#cursor-status")!.textContent = "셀 위에 커서를 올려보세요"; });
 canvasScroll.addEventListener("wheel", (event) => {
   if (event.deltaY === 0) return;
@@ -1995,6 +2430,12 @@ document.querySelectorAll<HTMLButtonElement>("[data-layer]").forEach((button) =>
   document.querySelector("#image-palette")!.classList.toggle("hidden", selectedLayer !== "image");
   renderImageDetails();
 }));
+document.querySelectorAll<HTMLButtonElement>("[data-ground-edit-tab]").forEach((button) => button.addEventListener("click", () => {
+  setGroundEditTab(button.dataset.groundEditTab as GroundEditTab);
+}));
+document.querySelectorAll<HTMLButtonElement>("[data-tile-elevation]").forEach((button) => button.addEventListener("click", () => {
+  setTileElevationOption(Number(button.dataset.tileElevation) as TileElevation);
+}));
 document.querySelectorAll<HTMLButtonElement>("[data-ground]").forEach((button) => button.addEventListener("click", () => {
   selectedGround = button.dataset.ground as GroundType;
   document.querySelectorAll("[data-ground]").forEach((item) => item.classList.toggle("selected", item === button));
@@ -2010,17 +2451,41 @@ document.querySelectorAll<HTMLButtonElement>("[data-prop-mode]").forEach((button
 document.querySelectorAll<HTMLButtonElement>("[data-image-mode]").forEach((button) => button.addEventListener("click", () => {
   setImageMode(button.dataset.imageMode as PropMode);
 }));
+document.querySelector<HTMLInputElement>("#image-continuous-placement")!.addEventListener("change", (event) => {
+  imageContinuousPlacement = (event.target as HTMLInputElement).checked;
+});
+document.querySelectorAll<HTMLButtonElement>("[data-image-material-tab]").forEach((button) => button.addEventListener("click", () => {
+  imageMaterialTab = button.dataset.imageMaterialTab as ImageMaterialTab;
+  renderImageMaterials();
+  if (imageMaterialTab === "mine" && authSession) void refreshImageMaterials();
+}));
 document.querySelector<HTMLInputElement>("#image-rotation")!.addEventListener("input", (event) => {
   applySelectedImageTransform(Number((event.target as HTMLInputElement).value), selectedImageScale);
 });
-document.querySelector<HTMLInputElement>("#image-rotation")!.addEventListener("change", () => {
+document.querySelector<HTMLInputElement>("#image-rotation-slider")!.addEventListener("input", (event) => {
+  applySelectedImageTransform(Number((event.target as HTMLInputElement).value), selectedImageScale);
+});
+document.querySelectorAll<HTMLInputElement>("#image-rotation, #image-rotation-slider").forEach((input) => input.addEventListener("change", () => {
   imageTransformChanged = false;
   scheduleSave();
-});
+}));
 document.querySelector<HTMLInputElement>("#image-scale")!.addEventListener("input", (event) => {
   applySelectedImageTransform(selectedImageRotation, Number((event.target as HTMLInputElement).value) / 100);
 });
-document.querySelector<HTMLInputElement>("#image-scale")!.addEventListener("change", () => {
+document.querySelector<HTMLInputElement>("#image-scale-slider")!.addEventListener("input", (event) => {
+  applySelectedImageTransform(selectedImageRotation, Number((event.target as HTMLInputElement).value) / 100);
+});
+document.querySelectorAll<HTMLInputElement>("#image-scale, #image-scale-slider").forEach((input) => input.addEventListener("change", () => {
+  imageTransformChanged = false;
+  scheduleSave();
+}));
+document.querySelector("#reset-image-rotation")!.addEventListener("click", () => {
+  applySelectedImageTransform(DEFAULT_IMAGE_ROTATION, selectedImageScale);
+  imageTransformChanged = false;
+  scheduleSave();
+});
+document.querySelector("#reset-image-scale")!.addEventListener("click", () => {
+  applySelectedImageTransform(selectedImageRotation, DEFAULT_IMAGE_SCALE);
   imageTransformChanged = false;
   scheduleSave();
 });
@@ -2063,6 +2528,7 @@ document.querySelector("#save-map-as")!.addEventListener("click", () => openMapS
 document.querySelector("#open-map-library")!.addEventListener("click", () => { void openMapLibrary(); });
 document.querySelector("#open-image-library")!.addEventListener("click", () => { window.location.assign("/images/"); });
 document.querySelector("#open-resize-map")!.addEventListener("click", openResizeMapDialog);
+document.querySelector("#open-admin-users")!.addEventListener("click", () => { void openAdminUsers(); });
 document.querySelector("#confirm-map-save")!.addEventListener("click", () => { void saveMapToCloud(); });
 document.querySelector("#confirm-resize-map")!.addEventListener("click", applyMapResize);
 document.querySelectorAll<HTMLButtonElement>("[data-resize-anchor]").forEach((button) => button.addEventListener("click", () => {
@@ -2149,6 +2615,7 @@ document.querySelector("#logout")!.addEventListener("click", async () => {
     imageAssetsLoaded = false;
     imageAssetsById.clear();
     imageRenderImages.clear();
+    imageMaterialTab = "default";
     selectedImageId = null;
     selectedImagePlacementIndex = null;
     renderImageMaterials();
@@ -2161,6 +2628,7 @@ document.querySelector("#logout")!.addEventListener("click", async () => {
     }
     button.disabled = false;
     renderLoggedOut();
+    void refreshAdminAccess();
   }
 });
 window.addEventListener("keydown", (event) => {

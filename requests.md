@@ -458,3 +458,15 @@
 - Added a tile-internal `지형`/`레이어` sub-tab with `기본 높이` and `1층 올리기` controls.
 - Added persisted per-cell elevation values limited to 0 or 1; water cells cannot be raised and legacy maps default missing values to 0.
 - Rendered one-tile-high exposed side faces for raised non-water tiles, passed 45 tests and the production build, deployed Pages preview `https://44e349eb.mapedit.pages.dev`, and verified the live controls.
+
+## Improve bridge connection rendering 2026-08-02 23:00:00 ~ 2026-08-02 23:06:06 (6분 6초)
+
+- Split bridge neighbor masks into cardinal arms and exposed endpoints so horizontal, vertical, corner, junction, and full bridge connections choose their rendering direction from adjacent bridge tiles.
+- Rendered connected bridge arms with direction-aware texture passes and added procedural wood landing/end-caps only at true bridge endpoints.
+- Added focused autotile tests for bridge arms and endpoint masks; passed the focused bridge tests, web typecheck, production build, and `git diff --check`. Deployment, commit, and push were intentionally not performed per request.
+
+## Finalize landmark, admin, image, water, and shrub rendering integration 2026-08-02 23:07:00 ~ 2026-08-02 23:08:17 (1분 17초)
+
+- Added 20 static transparent landmark materials while keeping legacy built-in image ids resolvable for existing drafts without exposing the old props in the default palette.
+- Integrated image-material tabs, continuous-placement toggle, transform sliders and per-field SVG reset controls, developer/admin user management with saved-map browsing, water bank direction treatment, and centered shrub rendering.
+- Ran the full typecheck, 46 tests, production build, and diff validation successfully. Deployment and repository publication follow after the final production deployment check.

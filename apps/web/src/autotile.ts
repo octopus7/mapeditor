@@ -163,6 +163,18 @@ export type BridgeConnectionShape =
   | "junction"
   | "full";
 
+export type BridgeDirection = "N" | "E" | "S" | "W";
+
+export const BRIDGE_CARDINAL_MASK =
+  NEIGHBOR_MASK.N | NEIGHBOR_MASK.E | NEIGHBOR_MASK.S | NEIGHBOR_MASK.W;
+
+const BRIDGE_DIRECTIONS: ReadonlyArray<readonly [BridgeDirection, number]> = [
+  ["N", NEIGHBOR_MASK.N],
+  ["E", NEIGHBOR_MASK.E],
+  ["S", NEIGHBOR_MASK.S],
+  ["W", NEIGHBOR_MASK.W],
+];
+
 /**
  * Classifies the primary bridge direction while preserving the full mask
  * for rendering diagonal fills and junctions.
@@ -172,9 +184,7 @@ export function getBridgeConnectionShape(mask: number): BridgeConnectionShape {
   if (normalized === 0) return "isolated";
   if (normalized === 255) return "full";
 
-  const cardinalMask = normalized & (
-    NEIGHBOR_MASK.N | NEIGHBOR_MASK.E | NEIGHBOR_MASK.S | NEIGHBOR_MASK.W
-  );
+  const cardinalMask = normalized & BRIDGE_CARDINAL_MASK;
   if (cardinalMask === (NEIGHBOR_MASK.E | NEIGHBOR_MASK.W)) return "horizontal";
   if (cardinalMask === (NEIGHBOR_MASK.N | NEIGHBOR_MASK.S)) return "vertical";
   if (cardinalMask === (NEIGHBOR_MASK.N | NEIGHBOR_MASK.E)) return "corner-ne";
@@ -184,6 +194,32 @@ export function getBridgeConnectionShape(mask: number): BridgeConnectionShape {
   if (cardinalMask === NEIGHBOR_MASK.N || cardinalMask === NEIGHBOR_MASK.S) return "vertical";
   if (cardinalMask === NEIGHBOR_MASK.E || cardinalMask === NEIGHBOR_MASK.W) return "horizontal";
   return "junction";
+}
+
+/** Returns the cardinal bridge arms that should be rendered for a connection mask. */
+export function getBridgeConnectionDirections(mask: number): BridgeDirection[] {
+  const normalized = normalizeBlobMask(mask);
+  return BRIDGE_DIRECTIONS
+    .filter(([, bit]) => (normalized & bit) !== 0)
+    .map(([direction]) => direction);
+}
+
+/** Returns the cardinal directions that need a procedural landing/end-cap. */
+export function getBridgeEndpointMask(mask: number): number {
+  const cardinalMask = normalizeBlobMask(mask) & BRIDGE_CARDINAL_MASK;
+  if (cardinalMask === 0) return BRIDGE_CARDINAL_MASK;
+
+  const horizontalMask = NEIGHBOR_MASK.E | NEIGHBOR_MASK.W;
+  const verticalMask = NEIGHBOR_MASK.N | NEIGHBOR_MASK.S;
+  if (cardinalMask === horizontalMask) return 0;
+  if (cardinalMask === verticalMask) return 0;
+  if (cardinalMask === NEIGHBOR_MASK.E || cardinalMask === NEIGHBOR_MASK.W) {
+    return horizontalMask & ~cardinalMask;
+  }
+  if (cardinalMask === NEIGHBOR_MASK.N || cardinalMask === NEIGHBOR_MASK.S) {
+    return verticalMask & ~cardinalMask;
+  }
+  return BRIDGE_CARDINAL_MASK & ~cardinalMask;
 }
 
 /** The source bridge image is naturally oriented along the vertical axis. */

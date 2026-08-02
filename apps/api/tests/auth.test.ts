@@ -15,6 +15,7 @@ import {
   validateDisplayName,
   validateMemeImageResponse,
   type AvatarIcon,
+  type AdminUser,
   type GoogleIdentity,
   type Profile,
   type UserRepository,
@@ -28,6 +29,7 @@ const ALLOWED_ORIGINS =
 class InMemoryUserRepository implements UserRepository {
   readonly profiles = new Map<string, Profile>();
   readonly subjects = new Map<string, string>();
+  readonly admins = new Set<string>();
 
   async findById(id: string): Promise<Profile | null> {
     return this.profiles.get(id) ?? null;
@@ -63,6 +65,24 @@ class InMemoryUserRepository implements UserRepository {
     const profile = { ...existing, displayName, avatarIcon };
     this.profiles.set(id, profile);
     return profile;
+  }
+
+  async isAdmin(id: string): Promise<boolean> {
+    return this.admins.has(id);
+  }
+
+  async listUsers(limit: number): Promise<AdminUser[]> {
+    return [...this.profiles.values()].slice(0, limit).map((profile) => ({
+      ...profile,
+      isAdmin: this.admins.has(profile.id),
+    }));
+  }
+
+  async promoteToAdmin(id: string): Promise<AdminUser | null> {
+    const profile = this.profiles.get(id);
+    if (!profile) return null;
+    this.admins.add(id);
+    return { ...profile, isAdmin: true };
   }
 }
 
@@ -146,10 +166,9 @@ function createTestApi() {
     createUserRepository: () => users,
     createImageRepository: () => images,
     createMapRepository: () => maps,
-    verifyGoogleCredential: async () => ({
-      subject: "google-subject-1",
-      email: "editor@example.com",
-    }),
+    verifyGoogleCredential: async (credential) => credential === "test-google-credential"
+      ? { subject: "google-subject-1", email: "editor@example.com" }
+      : { subject: credential, email: `${credential}@example.com` },
   });
   const env = {
     ALLOWED_ORIGINS,
@@ -166,12 +185,13 @@ function createTestApi() {
 async function login(
   handler: ReturnType<typeof createApiHandler>,
   env: Omit<Env, "DB">,
+  credential = "test-google-credential",
 ): Promise<{ token: string; profile: Profile }> {
   const response = await handler.fetch!(
     new Request("https://api.example.com/auth/google", {
       method: "POST",
       headers: { "Content-Type": "application/json", Origin: ALLOWED_ORIGIN },
-      body: JSON.stringify({ credential: "test-google-credential" }),
+      body: JSON.stringify({ credential }),
     }),
     env as Env,
     {} as ExecutionContext,
@@ -419,6 +439,87 @@ describe("authentication API", () => {
       error: { debug?: unknown };
     };
     expect(nonDeveloperBody.error.debug).toBeUndefined();
+  });
+
+  it("allows the developer IP to list users and promote an existing user", async () => {
+    const { env, handler } = createTestApi();
+    const firstSession = await login(handler, env);
+    const secondSession = await login(handler, env, "second-google-credential");
+
+    const listResponse = await handler.fetch!(
+      new Request("https://api.example.com/admin/users", {
+        headers: { Origin: ALLOWED_ORIGIN, "CF-Connecting-IP": "14.35.239.105" },
+      }),
+      env as Env,
+      {} as ExecutionContext,
+    );
+    expect(listResponse.status).toBe(200);
+    expect(await listResponse.json()).toEqual({
+      users: [
+        { ...firstSession.profile, isAdmin: false },
+        { ...secondSession.profile, isAdmin: false },
+      ],
+    });
+
+    const promoteResponse = await handler.fetch!(
+      new Request(`https://api.example.com/admin/users/${encodeURIComponent(secondSession.profile.id)}/admin`, {
+        method: "POST",
+        headers: { Origin: ALLOWED_ORIGIN, "CF-Connecting-IP": "14.35.239.105" },
+      }),
+      env as Env,
+      {} as ExecutionContext,
+    );
+    expect(promoteResponse.status).toBe(200);
+    expect(await promoteResponse.json()).toEqual({
+      user: { ...secondSession.profile, isAdmin: true },
+    });
+  });
+
+  it("allows admins but rejects unauthenticated and regular users", async () => {
+    const { env, handler, users } = createTestApi();
+    const regularSession = await login(handler, env);
+    const adminSession = await login(handler, env, "admin-google-credential");
+    users.admins.add(adminSession.profile.id);
+
+    const regularResponse = await handler.fetch!(
+      new Request("https://api.example.com/admin/users", {
+        headers: { Authorization: `Bearer ${regularSession.token}`, Origin: ALLOWED_ORIGIN },
+      }),
+      env as Env,
+      {} as ExecutionContext,
+    );
+    expect(regularResponse.status).toBe(403);
+    expect((await regularResponse.json() as { error: { code: string } }).error.code).toBe("ADMIN_REQUIRED");
+
+    const missingResponse = await handler.fetch!(
+      new Request("https://api.example.com/admin/users", { headers: { Origin: ALLOWED_ORIGIN } }),
+      env as Env,
+      {} as ExecutionContext,
+    );
+    expect(missingResponse.status).toBe(401);
+
+    const adminResponse = await handler.fetch!(
+      new Request("https://api.example.com/admin/users", {
+        headers: { Authorization: `Bearer ${adminSession.token}`, Origin: ALLOWED_ORIGIN },
+      }),
+      env as Env,
+      {} as ExecutionContext,
+    );
+    expect(adminResponse.status).toBe(200);
+  });
+
+  it("does not reveal whether a user exists to an unauthorized request", async () => {
+    const { env, handler } = createTestApi();
+    const response = await handler.fetch!(
+      new Request("https://api.example.com/admin/users/missing/admin", {
+        method: "POST",
+        headers: { Origin: ALLOWED_ORIGIN, "CF-Connecting-IP": "192.0.2.1" },
+      }),
+      env as Env,
+      {} as ExecutionContext,
+    );
+    expect(response.status).toBe(401);
+    expect((await response.json() as { error: { code: string } }).error.code).toBe("AUTH_REQUIRED");
   });
 });
 
