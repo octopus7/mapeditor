@@ -162,6 +162,37 @@ describe("autotile calculations", () => {
     expect(getTransitionLayers(map, 1, 1)).toEqual([]);
   });
 
+  it("keeps bridge cells out of ground transition corrections", () => {
+    const map = createMap([
+      ["stone", "stone", "stone"],
+      ["grass", "grass", "grass"],
+      ["grass", "grass", "grass"],
+    ]);
+    map.cells[1].prop = "footbridge";
+    map.cells[4].prop = "footbridge";
+
+    expect(getTransitionCorrections(map, 1, 1)).toEqual([]);
+    expect(getTransitionCorrections(map, 1, 2)).not.toContainEqual(expect.objectContaining({
+      targetColumn: 1,
+      targetRow: 1,
+    }));
+    expect(getTransitionLayers(map, 1, 1)).toEqual([]);
+  });
+
+  it("does not create water bank corrections for bridge footprints", () => {
+    const map = createMap([
+      ["water", "water", "water"],
+      ["grass", "grass", "grass"],
+      ["grass", "grass", "grass"],
+    ]);
+    map.cells[1].prop = "footbridge";
+    map.cells[4].prop = "footbridge";
+
+    expect(getWaterBankMask(map, 1, 1)).toBe(0);
+    expect(getWaterBankMask(map, 1, 2)).toBe(0);
+    expect(getWaterBankCornerMask(map, 1, 1)).toBe(0);
+  });
+
   it("returns water edges only for land cells that need a raised bank", () => {
     const map = createMap([
       ["grass", "water", "grass"],

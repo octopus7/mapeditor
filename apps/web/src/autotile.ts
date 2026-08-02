@@ -130,6 +130,7 @@ function getCardinalNeighborMask(
   column: number,
   row: number,
   ground: GroundType,
+  excludedProp?: PropType,
 ): number {
   if (!isInside(map, column, row)) return 0;
 
@@ -141,7 +142,9 @@ function getCardinalNeighborMask(
       row + direction.row,
       currentGround,
     );
-    return neighborGround === ground ? result | direction.bit : result;
+    if (neighborGround !== ground || !isInside(map, column + direction.column, row + direction.row)) return result;
+    const neighbor = map.cells[cellIndex(map, column + direction.column, row + direction.row)];
+    return neighbor.prop === excludedProp ? result : result | direction.bit;
   }, 0);
 }
 
@@ -168,7 +171,9 @@ export function getTransitionCorrections(
 ): TransitionCorrection[] {
   if (!isInside(map, column, row)) return [];
 
-  const sourceGround = map.cells[cellIndex(map, column, row)].ground;
+  const sourceCell = map.cells[cellIndex(map, column, row)];
+  if (sourceCell.prop === "footbridge") return [];
+  const sourceGround = sourceCell.ground;
   const sourcePriority = GROUND_PRIORITY[sourceGround];
   if (sourceGround === "water") return [];
 
@@ -177,7 +182,9 @@ export function getTransitionCorrections(
       const targetColumn = column + direction.column;
       const targetRow = row + direction.row;
       if (!isInside(map, targetColumn, targetRow)) return null;
-      const targetGround = map.cells[cellIndex(map, targetColumn, targetRow)].ground;
+      const targetCell = map.cells[cellIndex(map, targetColumn, targetRow)];
+      if (targetCell.prop === "footbridge") return null;
+      const targetGround = targetCell.ground;
       if (
         targetGround === "water" ||
         GROUND_PRIORITY[targetGround] <= sourcePriority ||
@@ -196,7 +203,9 @@ export function getTransitionCorrections(
       const targetColumn = column + direction.column;
       const targetRow = row + direction.row;
       if (!isInside(map, targetColumn, targetRow)) return null;
-      const targetGround = map.cells[cellIndex(map, targetColumn, targetRow)].ground;
+      const targetCell = map.cells[cellIndex(map, targetColumn, targetRow)];
+      if (targetCell.prop === "footbridge") return null;
+      const targetGround = targetCell.ground;
       if (
         targetGround === "water" ||
         GROUND_PRIORITY[targetGround] <= sourcePriority ||
@@ -267,8 +276,9 @@ export function getWaterBankMask(
   row: number,
 ): number {
   if (!isInside(map, column, row)) return 0;
-  if (map.cells[cellIndex(map, column, row)].ground === "water") return 0;
-  return getCardinalNeighborMask(map, column, row, "water");
+  const currentCell = map.cells[cellIndex(map, column, row)];
+  if (currentCell.ground === "water" || currentCell.prop === "footbridge") return 0;
+  return getCardinalNeighborMask(map, column, row, "water", "footbridge");
 }
 
 /** Returns diagonal water corners only when both touching cardinal cells are water. */
@@ -278,17 +288,21 @@ export function getWaterBankCornerMask(
   row: number,
 ): number {
   if (!isInside(map, column, row)) return 0;
-  if (map.cells[cellIndex(map, column, row)].ground === "water") return 0;
+  const currentCell = map.cells[cellIndex(map, column, row)];
+  if (currentCell.ground === "water" || currentCell.prop === "footbridge") return 0;
   return DIAGONAL_DIRECTIONS.reduce((result, direction) => {
     const targetColumn = column + direction.column;
     const targetRow = row + direction.row;
     if (!isInside(map, targetColumn, targetRow)) return result;
-    if (map.cells[cellIndex(map, targetColumn, targetRow)].ground !== "water") return result;
-    const adjacentGrounds = [
-      map.cells[cellIndex(map, column + direction.column, row)].ground,
-      map.cells[cellIndex(map, column, row + direction.row)].ground,
+    const targetCell = map.cells[cellIndex(map, targetColumn, targetRow)];
+    if (targetCell.ground !== "water" || targetCell.prop === "footbridge") return result;
+    const adjacentCells = [
+      map.cells[cellIndex(map, column + direction.column, row)],
+      map.cells[cellIndex(map, column, row + direction.row)],
     ];
-    return adjacentGrounds.every((ground) => ground === "water") ? result | direction.bit : result;
+    return adjacentCells.every((cell) => cell.ground === "water" && cell.prop !== "footbridge")
+      ? result | direction.bit
+      : result;
   }, 0);
 }
 
@@ -413,7 +427,9 @@ export function getTransitionLayers(
 ): TransitionLayer[] {
   if (!isInside(map, column, row)) return [];
 
-  const currentGround = map.cells[cellIndex(map, column, row)].ground;
+  const currentCell = map.cells[cellIndex(map, column, row)];
+  if (currentCell.prop === "footbridge") return [];
+  const currentGround = currentCell.ground;
   const currentPriority = GROUND_PRIORITY[currentGround];
   const layers = groundTypes
     // Water has its own directional bank/correction pass. Returning it here
