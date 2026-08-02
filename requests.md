@@ -371,3 +371,9 @@
 - Removed the guest `로그인` button from the top action bar and placed it in the opened file menu's account section.
 - Kept the logged-in profile control in the same account section and made the guest account section visible only through the menu.
 - Passed web checks (39), API tests (18), deployed Worker and Pages, and verified the production bundle and Worker health.
+
+## Verify unauthenticated image API access 2026-08-02 21:38:25 ~ 2026-08-02 21:39:23 (0분 58초)
+
+- Reviewed the Worker route and confirmed both `GET /images` and `POST /images` call `requireProfile()` before accessing image data or the upload service.
+- Verified the deployed Worker with unauthenticated requests; both image endpoints returned HTTP 401.
+- Confirmed the public `meme.devtuna.win/i/<hash>.<extension>` URL is separate from the mapeditor API and remains intentionally public for rendering stored images; no code change or redeployment was necessary.
