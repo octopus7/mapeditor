@@ -422,3 +422,9 @@
 - Added a third `이미지` material tab beside `타일` and `사물`, loading the authenticated user's saved image assets by their stable image hash.
 - Added image placement, movement, deletion, and persisted placement transforms for rotation and scale.
 - Added transform controls with live preview, automatic draft/map save integration, backward-compatible map deserialization, tests, Pages deployment, and live UI verification.
+
+## Fix bridge connection orientation 2026-08-02 22:05:35 ~ 2026-08-02 22:07:52 (2분 17초)
+
+- Compared the bridge source asset with the rendered connection shapes and corrected the reversed rotation mapping: the vertical source remains unrotated for vertical connections, while horizontal connections rotate 90 degrees.
+- Added focused rotation assertions and passed all static checks: 43 tests, type checks, production build, and diff validation.
+- Deployed Worker version `b152ecd6-f998-4658-ac73-8cb2b0e2aef6` and Pages preview `https://75e64bb4.mapedit.pages.dev`, then verified the production health endpoint and bundle.

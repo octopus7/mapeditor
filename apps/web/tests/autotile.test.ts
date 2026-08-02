@@ -3,6 +3,7 @@ import {
   GROUND_PRIORITY,
   NEIGHBOR_MASK,
   getBridgeConnectionShape,
+  getBridgeTextureRotation,
   getPropNeighborMask,
   getNeighborMask,
   getTransitionLayers,
@@ -18,6 +19,7 @@ function createMap(rows: GroundType[][]): MapDocument {
     columns,
     rows: rows.length,
     cells: rows.flatMap((row) => row.map((ground) => ({ ground, prop: null }))),
+    images: [],
     updatedAt: "2026-08-02T00:00:00.000Z",
   };
 }
@@ -114,6 +116,8 @@ describe("autotile calculations", () => {
     expect(getBridgeConnectionShape(NEIGHBOR_MASK.N | NEIGHBOR_MASK.S)).toBe("vertical");
     expect(getBridgeConnectionShape(NEIGHBOR_MASK.N | NEIGHBOR_MASK.E | NEIGHBOR_MASK.NE)).toBe("corner-ne");
     expect(getBridgeConnectionShape(255)).toBe("full");
+    expect(getBridgeTextureRotation("horizontal")).toBe(90);
+    expect(getBridgeTextureRotation("vertical")).toBe(0);
   });
 
   it("connects bridge props through cardinal and supported diagonal neighbors", () => {

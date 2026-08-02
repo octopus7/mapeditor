@@ -175,6 +175,11 @@ export function getBridgeConnectionShape(mask: number): BridgeConnectionShape {
   return "junction";
 }
 
+/** The source bridge image is naturally oriented along the vertical axis. */
+export function getBridgeTextureRotation(shape: BridgeConnectionShape): 0 | 90 {
+  return shape === "horizontal" ? 90 : 0;
+}
+
 /**
  * Calculates the higher-priority neighboring ground layers for a cell.
  * Layers are returned from lowest to highest priority so later layers can
